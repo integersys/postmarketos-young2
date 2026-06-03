@@ -1,0 +1,16 @@
+# Ignore downloaded ROMs and extracted images
+*.zip
+*.tar
+*.tar.md5
+*.img
+*.bin
+
+# Ignore pmbootstrap build artifacts
+chroots/
+work/
+images/
+*.apk
+
+# Ignore OS-specific hidden files
+.DS_Store
+Thumbs.db
