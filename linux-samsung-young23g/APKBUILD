@@ -27,10 +27,9 @@ prepare() {
     cp include/linux/compiler-gcc4.h include/linux/compiler-gcc15.h
     echo 'int main(void){return 0;}' > scripts/sortextable.c
     cp "$srcdir/config-$pkgname.armv7" .config
-    
-   
     sed -i 's/#alloc, #execinstr/"ax"/g' arch/arm/boot/compressed/*.S
     sed -i 's/#alloc/"a"/g' arch/arm/boot/compressed/*.S
+    sed -i 's|/home/cakl/toolchain/bin/arm-eabi-||g' Makefile
 }
 
 build() {
@@ -39,9 +38,8 @@ build() {
     export CROSS_COMPILE="armv7-alpine-linux-musleabihf-"
     export ARCH="arm"
     export LOCALVERSION="-pmos"
-   
-    sed -i 's|/home/cakl/toolchain/bin/arm-eabi-||g' Makefile
     make olddefconfig
+    sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=""/' .config
     make -j$(nproc)
 }
 
@@ -49,6 +47,8 @@ package() {
     cd "$builddir"
     install -Dm644 arch/arm/boot/zImage "$pkgdir/boot/vmlinuz-$pkgname"
     make modules_install INSTALL_MOD_PATH="$pkgdir" INSTALL_MOD_STRIP=1
+    install -Dm644 include/config/kernel.release \
+        "$pkgdir/usr/share/kernel/$pkgname/kernel.release"
 }
 
 sha512sums="
