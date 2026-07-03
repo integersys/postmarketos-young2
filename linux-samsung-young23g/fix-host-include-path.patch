@@ -1,9 +1,0 @@
---- a/scripts/Makefile.host
-+++ b/scripts/Makefile.host
-@@ -20,6 +20,7 @@
- # Additional options for host programs
- HOST_EXTRACFLAGS += -I$(srctree)/tools/include
-+HOST_EXTRACFLAGS += -I$(srctree)/include
- 
- # Additional options for host programs compiled with C++
- HOST_EXTRACXXFLAGS += -I$(srctree)/tools/include
