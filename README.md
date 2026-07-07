@@ -47,6 +47,16 @@ The device currently boots into a headless postmarketOS/Alpine userspace and can
 - Modem, calls, SMS, and mobile data are not working/tested
 - This is not ready for normal phone use, but it sure is interesting to watch!
 
+## Future plans
+- Try to bring up a basic graphical environment
+- Test touchscreen input
+- Investigate Wi-Fi support
+- Fix or improve NetworkManager/dbus-related issues
+- Investigate sensors, buttons, vibration, and battery reporting
+- Test charging, shutdown, reboot, suspend, and general power management
+- Improve documentation
+- Test if using an older version of postmarketOS can improve stability.
+
 # Installation guide
 
 **Warning:** This is a manual dev bring-up, not an official installer. Tested only on SM-G130HN — other models/firmware may brick. Verify your model first: `Settings -> About phone -> Model number`. Proceed at your own risk.
@@ -208,7 +218,6 @@ Use this if you want to build or modify the port yourself. Requires the release 
     ```sh
     ssh -tt -p 2222 root@172.16.42.1
     ```
-
 
 ## Sources
 
