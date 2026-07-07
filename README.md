@@ -2,6 +2,10 @@
 
 postmarketOS port for the Samsung Galaxy Young 2
 
+## What is postmarketOS?
+
+postmarketOS is a Linux distribution based on Alpine Linux, replacing the stock Android system with a real Linux userspace. Essentially, real linux on a phone.
+
 > Device page: [Samsung Galaxy Young 2 (samsung-young23g)](https://wiki.postmarketos.org/wiki/Samsung_Galaxy_Young_2_(samsung-young23g))
 
 <div align="center">
@@ -47,7 +51,7 @@ The device currently boots into a headless postmarketOS/Alpine userspace and can
 
 **Warning:** This is a manual dev bring-up, not an official installer. Tested only on SM-G130HN — other models/firmware may brick. Verify your model first: `Settings -> About phone -> Model number`. Proceed at your own risk.
 
-**End result:** Linux (Alpine/postmarketOS) boots and is reachable via USB SSH (`ssh -tt -p 2222 root@172.16.42.1`, login `root/root`). No GUI, Wi-Fi, sound, camera, modem, calls, SMS, or daily-driver use yet.
+**End result:** Linux (Alpine/postmarketOS) boots and is reachable via USB SSH (`ssh -tt -p 2222 root@172.16.42.1`, login `root/root`). No practical/usable GUI, Wi-Fi, sound, camera, modem, calls, SMS, or daily-driver use yet.
 
 **Partition targets (SM-G130HN):**
 | Partition | Device |
