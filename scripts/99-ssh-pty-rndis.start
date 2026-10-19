@@ -1,0 +1,38 @@
+#!/bin/sh
+
+(
+sleep 20
+
+mkdir -p /dev/pts
+umount /dev/pts 2>/dev/null || true
+mount -t devpts devpts /dev/pts -o mode=620
+
+rm -f /dev/ptmx
+mknod /dev/ptmx c 5 2
+chmod 666 /dev/ptmx
+
+rm -f /dev/random /dev/urandom /dev/zero
+mknod /dev/random c 1 8
+mknod /dev/urandom c 1 9
+mknod /dev/zero c 1 5
+chmod 666 /dev/random /dev/urandom /dev/zero
+
+[ -x /usr/sbin/haveged ] && /usr/sbin/haveged -w 1024 >/tmp/haveged-late.log 2>&1 &
+[ -x /usr/bin/ssh-keygen ] && /usr/bin/ssh-keygen -A >/tmp/ssh-keygen-late.log 2>&1
+
+echo 0 > /sys/class/android_usb/android0/enable 2>/dev/null
+echo rndis > /sys/class/android_usb/android0/functions 2>/dev/null
+echo 18d1 > /sys/class/android_usb/android0/idVendor 2>/dev/null
+echo 4e23 > /sys/class/android_usb/android0/idProduct 2>/dev/null
+echo 1 > /sys/class/android_usb/android0/enable 2>/dev/null
+
+sleep 3
+ifconfig rndis0 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null
+
+killall sshd.pam 2>/dev/null
+killall sshd 2>/dev/null
+
+SSHD=/usr/sbin/sshd.pam
+[ -x "$SSHD" ] || SSHD=/usr/sbin/sshd
+[ -x "$SSHD" ] && "$SSHD" -D -e -p 2222 >/tmp/sshd-late.log 2>&1 &
+) &

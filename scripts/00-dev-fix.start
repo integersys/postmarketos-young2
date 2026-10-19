@@ -1,0 +1,15 @@
+#!/bin/sh
+mkdir -p /dev/pts
+mountpoint -q /dev/pts || mount -t devpts devpts /dev/pts -o mode=620
+rm -f /dev/ptmx
+mknod /dev/ptmx c 5 2
+chmod 666 /dev/ptmx
+
+rm -f /dev/random /dev/urandom /dev/zero
+mknod /dev/random c 1 8
+mknod /dev/urandom c 1 9
+mknod /dev/zero c 1 5
+chmod 666 /dev/random /dev/urandom /dev/zero
+
+[ -x /usr/sbin/haveged ] && /usr/sbin/haveged -w 1024 >/tmp/haveged.log 2>&1 &
+[ -x /usr/bin/ssh-keygen ] && /usr/bin/ssh-keygen -A >/tmp/ssh-keygen.log 2>&1
