@@ -1,24 +1,46 @@
+# Downstream kernel source recipe; see docs/building.md for validation limits.
 pkgname=linux-samsung-young23g
 pkgver=3.10.17
-pkgrel=1
-pkgdesc="Linux kernel package for Samsung Galaxy Young 2"
+pkgrel=2
+pkgdesc="Samsung Galaxy Young 2 downstream kernel for XFCE development"
 arch="armv7"
-_carch="arm"
-_flavor="samsung-young23g"
-_kernrel="3.10.17-samsung-young23g"
-url="https://postmarketos.org"
+url="https://github.com/jnkcode/android_kernel_samsung_young23g"
 license="GPL-2.0-only"
-options="!check !archcheck !strip"
-source=""
+makedepends="bash bc bison devicepkg-dev flex openssl-dev perl xz"
+options="!check !strip !tracedeps"
+_commit=e05a1c16fb7334378bb12d8116d0def2ef83ff0d
+source="
+    $pkgname-$pkgver.tar.gz::https://github.com/jnkcode/android_kernel_samsung_young23g/archive/$_commit.tar.gz
+    config-xfce.armv7
+    patches/0001-gcc15-compatibility.patch
+    patches/0002-sprdfb-resume.patch
+"
+builddir="$srcdir/android_kernel_samsung_young23g-$_commit"
 
-package() {
-	mkdir -p "$pkgdir/boot"
-	echo "kernel placeholder" > "$pkgdir/boot/vmlinuz-$_flavor"
-
-	mkdir -p "$pkgdir/usr/lib/modules/$_kernrel"
-	touch "$pkgdir/usr/lib/modules/$_kernrel/modules.order"
-	touch "$pkgdir/usr/lib/modules/$_kernrel/modules.builtin"
-	touch "$pkgdir/usr/lib/modules/$_kernrel/modules.dep"
+prepare() {
+    default_prepare
+    cp "$srcdir/config-xfce.armv7" "$builddir/.config"
 }
 
-sha512sums=""
+build() {
+    unset LDFLAGS
+    local cross="${CROSS_COMPILE:-armv7-alpine-linux-musleabihf-}"
+    make ARCH=arm CROSS_COMPILE="$cross" CC="${cross}gcc -msoft-float" olddefconfig
+    make ARCH=arm CROSS_COMPILE="$cross" CC="${cross}gcc -msoft-float"
+}
+
+package() {
+    local cross="${CROSS_COMPILE:-armv7-alpine-linux-musleabihf-}"
+    install -Dm644 arch/arm/boot/zImage "$pkgdir/boot/vmlinuz-$pkgname"
+    make ARCH=arm CROSS_COMPILE="$cross" CC="${cross}gcc -msoft-float" \
+        modules_install INSTALL_MOD_PATH="$pkgdir" INSTALL_MOD_STRIP=1
+    install -Dm644 include/config/kernel.release \
+        "$pkgdir/usr/share/kernel/$pkgname/kernel.release"
+}
+
+sha512sums="
+cb82e0ad1d769440f2e6dd94149ce8e99a26153a6122b63e7e279d0d81c91c774a34d630df91bc5ec4665a8bd03efdfa626c7b5f2742eafb055fb468969edaab  linux-samsung-young23g-3.10.17.tar.gz
+949a6b973940dcf472a85bd7de08f2cb58b86f02c39bae6a11a9410d8efa6414e2119e0ed3476eaf7cd34466c17ee953efe5fadf90299e984be05d2927be5903  config-xfce.armv7
+b42cc7a71dd04913dbfd47b1034bdd4aa955403d897047678225424a02649fd1b4b8328293b9dee95b66ea7ee8487a21dab6710327810ea7cec511e04e5847f0  0001-gcc15-compatibility.patch
+f344d0c61feebcaf73542c20e6a7df0f560e528b3edd909a839218851b4e7911876a66b9adaccd79853d22f2baf408e76a1d18e224fa90bde6f97cfe007f6ca1  0002-sprdfb-resume.patch
+"

@@ -1,0 +1,58 @@
+diff --git a/drivers/video/sprdfb/sprdfb_main.c b/drivers/video/sprdfb/sprdfb_main.c
+index 12e9b77f..abb3ef9c 100644
+--- a/drivers/video/sprdfb/sprdfb_main.c
++++ b/drivers/video/sprdfb/sprdfb_main.c
+@@ -432,16 +432,46 @@ static int sprdfb_blank(int blank, struct fb_info *info)
+ 
+ static int sprdfb_check_var(struct fb_var_screeninfo *var, struct fb_info *fb)
+ {
++	/*
++	 * ORIGINAL behaviour rejected the var unless xres, yres, xres_virtual,
++	 * yres_virtual, xoffset and grayscale all matched fb->var EXACTLY.
++	 *
++	 * That breaks resume: fb_set_var() only calls fb_check_var() when the
++	 * submitted var differs from info->var, and fb_pan_display() writes
++	 * var->xoffset / var->yoffset back into info->var. Xorg's fbdev driver
++	 * re-submits its own saved var from fbdevHWEnterVT() after a resume, so
++	 * any pan that happened while X was running made xoffset differ, the
++	 * ioctl returned -EINVAL, and X died with "EnterVT failed for screen 0".
++	 *
++	 * FIX: validate only what the SCX15 display controller actually needs
++	 * (visible mode + colour depth), and FORCE the virtual-buffer geometry
++	 * and pan offset back to our own values so accepting a foreign var can
++	 * never move the scanout window or shrink the two-page 320x960 buffer.
++	 * bits_per_pixel is already excluded by BIT_PER_PIXEL_SURPPORT.
++	 */
+ 	if ((var->xres != fb->var.xres) ||
+ 		(var->yres != fb->var.yres) ||
+-		(var->xres_virtual != fb->var.xres_virtual) ||
++		(var->grayscale != fb->var.grayscale)) {
++		pr_info("sprdfb_check_var: REJECT xres=%u/%u yres=%u/%u gray=%u/%u\n",
++			var->xres, fb->var.xres, var->yres, fb->var.yres,
++			var->grayscale, fb->var.grayscale);
++		return -EINVAL;
++	}
++
++	if ((var->xres_virtual != fb->var.xres_virtual) ||
+ 		(var->yres_virtual != fb->var.yres_virtual) ||
+-		(var->xoffset != fb->var.xoffset) ||
+-#ifndef BIT_PER_PIXEL_SURPPORT
+-		(var->bits_per_pixel != fb->var.bits_per_pixel) ||
+-#endif
+-		(var->grayscale != fb->var.grayscale))
+-			return -EINVAL;
++		(var->xoffset != fb->var.xoffset)) {
++		pr_info("sprdfb_check_var: NORMALISE xres_v=%u->%u yres_v=%u->%u xoff=%u->%u\n",
++			var->xres_virtual, fb->var.xres_virtual,
++			var->yres_virtual, fb->var.yres_virtual,
++			var->xoffset, fb->var.xoffset);
++		var->xres_virtual = fb->var.xres_virtual;
++		var->yres_virtual = fb->var.yres_virtual;
++		var->xoffset = fb->var.xoffset;
++	}
++
++	pr_info("sprdfb_check_var: ACCEPT xres=%u yres=%u bpp=%u\n",
++		var->xres, var->yres, var->bits_per_pixel);
+ 	return 0;
+ }
+ 

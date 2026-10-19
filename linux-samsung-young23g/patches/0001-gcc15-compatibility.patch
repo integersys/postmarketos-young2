@@ -1,0 +1,640 @@
+diff --git a/Makefile b/Makefile
+index 10d5d638..064f621a 100755
+--- a/Makefile
++++ b/Makefile
+@@ -193,7 +193,7 @@ SUBARCH := $(shell uname -m | sed -e s/i.86/x86/ -e s/x86_64/x86/ \
+ # Default value for CROSS_COMPILE is not to prefix executables
+ # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
+ ARCH		=arm
+-CROSS_COMPILE	= /home/cakl/toolchain/bin/arm-eabi-
++CROSS_COMPILE	=
+ 
+ # Architecture as present in compile.h
+ UTS_MACHINE 	:= $(ARCH)
+@@ -241,7 +241,7 @@ CONFIG_SHELL := $(shell if [ -x "$$BASH" ]; then echo $$BASH; \
+ 
+ HOSTCC       = gcc
+ HOSTCXX      = g++
+-HOSTCFLAGS   = -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer
++HOSTCFLAGS   = -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89
+ HOSTCXXFLAGS = -O2
+ 
+ # Decide whether to build built-in, modular, or both.
+@@ -373,7 +373,9 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
+ 		   -fno-strict-aliasing -fno-common \
+ 		   -Werror-implicit-function-declaration \
+ 		   -Wno-format-security \
+-		   -fno-delete-null-pointer-checks
++		   -fno-delete-null-pointer-checks \
++		   -std=gnu89
++
+ KBUILD_AFLAGS_KERNEL :=
+ KBUILD_CFLAGS_KERNEL :=
+ KBUILD_AFLAGS   := -D__ASSEMBLY__
+diff --git a/arch/arm/boot/bootp/init.S b/arch/arm/boot/bootp/init.S
+index 78b50807..868eeeaa 100644
+--- a/arch/arm/boot/bootp/init.S
++++ b/arch/arm/boot/bootp/init.S
+@@ -16,7 +16,7 @@
+  *  size immediately following the kernel, we could build this into
+  *  a binary blob, and concatenate the zImage using the cat command.
+  */
+-		.section .start,#alloc,#execinstr
++		.section .start, "ax"
+ 		.type	_start, #function
+ 		.globl	_start
+ 
+diff --git a/arch/arm/boot/compressed/big-endian.S b/arch/arm/boot/compressed/big-endian.S
+index 25ab26f1..f22428e2 100644
+--- a/arch/arm/boot/compressed/big-endian.S
++++ b/arch/arm/boot/compressed/big-endian.S
+@@ -5,7 +5,7 @@
+  *  Author: Nicolas Pitre
+  */
+ 
+-	.section ".start", #alloc, #execinstr
++	.section ".start", "ax"
+ 
+ 	mrc	p15, 0, r0, c1, c0, 0	@ read control reg
+ 	orr	r0, r0, #(1 << 7)	@ enable big endian mode
+diff --git a/arch/arm/boot/compressed/head.S b/arch/arm/boot/compressed/head.S
+index a7cd6738..144a8e8b 100644
+--- a/arch/arm/boot/compressed/head.S
++++ b/arch/arm/boot/compressed/head.S
+@@ -114,7 +114,7 @@
+ #endif
+ 		.endm
+ 
+-		.section ".start", #alloc, #execinstr
++		.section ".start", "ax"
+ /*
+  * sort out different calling conventions
+  */
+diff --git a/arch/arm/boot/compressed/piggy.gzip.S b/arch/arm/boot/compressed/piggy.gzip.S
+index a68adf91..7de824f7 100644
+--- a/arch/arm/boot/compressed/piggy.gzip.S
++++ b/arch/arm/boot/compressed/piggy.gzip.S
+@@ -1,4 +1,4 @@
+-	.section .piggydata,#alloc
++	.section .piggydata,"a"
+ 	.globl	input_data
+ input_data:
+ 	.incbin	"arch/arm/boot/compressed/piggy.gzip"
+diff --git a/arch/arm/boot/compressed/piggy.lz4.S b/arch/arm/boot/compressed/piggy.lz4.S
+index 3d9a5756..d75efd21 100644
+--- a/arch/arm/boot/compressed/piggy.lz4.S
++++ b/arch/arm/boot/compressed/piggy.lz4.S
+@@ -1,4 +1,4 @@
+-	.section .piggydata,#alloc
++	.section .piggydata,"a"
+ 	.globl	input_data
+ input_data:
+ 	.incbin	"arch/arm/boot/compressed/piggy.lz4"
+diff --git a/arch/arm/boot/compressed/piggy.lzma.S b/arch/arm/boot/compressed/piggy.lzma.S
+index d7e69cff..e1eb3797 100644
+--- a/arch/arm/boot/compressed/piggy.lzma.S
++++ b/arch/arm/boot/compressed/piggy.lzma.S
+@@ -1,4 +1,4 @@
+-	.section .piggydata,#alloc
++	.section .piggydata,"a"
+ 	.globl	input_data
+ input_data:
+ 	.incbin	"arch/arm/boot/compressed/piggy.lzma"
+diff --git a/arch/arm/boot/compressed/piggy.lzo.S b/arch/arm/boot/compressed/piggy.lzo.S
+index a425ad95..4401d17e 100644
+--- a/arch/arm/boot/compressed/piggy.lzo.S
++++ b/arch/arm/boot/compressed/piggy.lzo.S
+@@ -1,4 +1,4 @@
+-	.section .piggydata,#alloc
++	.section .piggydata,"a"
+ 	.globl	input_data
+ input_data:
+ 	.incbin	"arch/arm/boot/compressed/piggy.lzo"
+diff --git a/arch/arm/boot/compressed/piggy.xzkern.S b/arch/arm/boot/compressed/piggy.xzkern.S
+index 5703f300..0436c2d4 100644
+--- a/arch/arm/boot/compressed/piggy.xzkern.S
++++ b/arch/arm/boot/compressed/piggy.xzkern.S
+@@ -1,4 +1,4 @@
+-	.section .piggydata,#alloc
++	.section .piggydata,"a"
+ 	.globl	input_data
+ input_data:
+ 	.incbin	"arch/arm/boot/compressed/piggy.xzkern"
+diff --git a/arch/arm/include/asm/uaccess.h b/arch/arm/include/asm/uaccess.h
+index 7e1f7602..c38e7ce7 100644
+--- a/arch/arm/include/asm/uaccess.h
++++ b/arch/arm/include/asm/uaccess.h
+@@ -164,7 +164,7 @@ extern int __put_user_8(void *, unsigned long long);
+ #define __put_user_check(x,p)							\
+ 	({								\
+ 		unsigned long __limit = current_thread_info()->addr_limit - 1; \
+-		register const typeof(*(p)) __r2 asm("r2") = (x);	\
++		register typeof(*(p)) __r2 asm("r2") = (x);	\
+ 		register const typeof(*(p)) __user *__p asm("r0") = (p);\
+ 		register unsigned long __l asm("r1") = __limit;		\
+ 		register int __e asm("r0");				\
+diff --git a/arch/arm/mm/proc-v7.S b/arch/arm/mm/proc-v7.S
+index 5fbccee5..86c914e4 100644
+--- a/arch/arm/mm/proc-v7.S
++++ b/arch/arm/mm/proc-v7.S
+@@ -384,7 +384,7 @@ __v7_setup_stack:
+ 	string	cpu_elf_name, "v7"
+ 	.align
+ 
+-	.section ".proc.info.init", #alloc, #execinstr
++	.section ".proc.info.init", "ax"
+ 
+ 	/*
+ 	 * Standard v7 proc info content
+diff --git a/include/linux/compiler-gcc15.h b/include/linux/compiler-gcc15.h
+new file mode 100644
+index 00000000..ded42996
+--- /dev/null
++++ b/include/linux/compiler-gcc15.h
+@@ -0,0 +1,92 @@
++#ifndef __LINUX_COMPILER_H
++#error "Please don't include <linux/compiler-gcc4.h> directly, include <linux/compiler.h> instead."
++#endif
++
++/* GCC 4.1.[01] miscompiles __weak */
++#ifdef __KERNEL__
++# if GCC_VERSION >= 40100 &&  GCC_VERSION <= 40101
++#  error Your version of gcc miscompiles the __weak directive
++# endif
++#endif
++
++#define __used			__attribute__((__used__))
++#define __must_check 		__attribute__((warn_unused_result))
++#define __compiler_offsetof(a,b) __builtin_offsetof(a,b)
++
++#if GCC_VERSION >= 40100 && GCC_VERSION < 40600
++# define __compiletime_object_size(obj) __builtin_object_size(obj, 0)
++#endif
++
++#if GCC_VERSION >= 40300
++/* Mark functions as cold. gcc will assume any path leading to a call
++   to them will be unlikely.  This means a lot of manual unlikely()s
++   are unnecessary now for any paths leading to the usual suspects
++   like BUG(), printk(), panic() etc. [but let's keep them for now for
++   older compilers]
++
++   Early snapshots of gcc 4.3 don't support this and we can't detect this
++   in the preprocessor, but we can live with this because they're unreleased.
++   Maketime probing would be overkill here.
++
++   gcc also has a __attribute__((__hot__)) to move hot functions into
++   a special section, but I don't see any sense in this right now in
++   the kernel context */
++#define __cold			__attribute__((__cold__))
++
++#define __UNIQUE_ID(prefix) __PASTE(__PASTE(__UNIQUE_ID_, prefix), __COUNTER__)
++
++#ifndef __CHECKER__
++# define __compiletime_warning(message) __attribute__((warning(message)))
++# define __compiletime_error(message) __attribute__((error(message)))
++#endif /* __CHECKER__ */
++#endif /* GCC_VERSION >= 40300 */
++
++#if GCC_VERSION >= 40500
++/*
++ * Mark a position in code as unreachable.  This can be used to
++ * suppress control flow warnings after asm blocks that transfer
++ * control elsewhere.
++ *
++ * Early snapshots of gcc 4.5 don't support this and we can't detect
++ * this in the preprocessor, but we can live with this because they're
++ * unreleased.  Really, we need to have autoconf for the kernel.
++ */
++#define unreachable() __builtin_unreachable()
++
++/* Mark a function definition as prohibited from being cloned. */
++#define __noclone	__attribute__((__noclone__))
++
++#endif /* GCC_VERSION >= 40500 */
++
++#if GCC_VERSION >= 40600
++/*
++ * Tell the optimizer that something else uses this function or variable.
++ */
++#define __visible __attribute__((externally_visible))
++#endif
++
++/*
++ * GCC 'asm goto' miscompiles certain code sequences:
++ *
++ *   http://gcc.gnu.org/bugzilla/show_bug.cgi?id=58670
++ *
++ * Work it around via a compiler barrier quirk suggested by Jakub Jelinek.
++ * Fixed in GCC 4.8.2 and later versions.
++ *
++ * (asm goto is automatically volatile - the naming reflects this.)
++ */
++#if GCC_VERSION <= 40801
++# define asm_volatile_goto(x...)	do { asm goto(x); asm (""); } while (0)
++#else
++# define asm_volatile_goto(x...)	do { asm goto(x); } while (0)
++#endif
++
++#ifdef CONFIG_ARCH_USE_BUILTIN_BSWAP
++#if GCC_VERSION >= 40400
++#define __HAVE_BUILTIN_BSWAP32__
++#define __HAVE_BUILTIN_BSWAP64__
++#endif
++#if GCC_VERSION >= 40800 || (defined(__powerpc__) && GCC_VERSION >= 40600)
++#define __HAVE_BUILTIN_BSWAP16__
++#endif
++#endif /* CONFIG_ARCH_USE_BUILTIN_BSWAP */
+diff --git a/include/linux/log2.h b/include/linux/log2.h
+index fd7ff3d9..f38fae23 100644
+--- a/include/linux/log2.h
++++ b/include/linux/log2.h
+@@ -15,12 +15,6 @@
+ #include <linux/types.h>
+ #include <linux/bitops.h>
+ 
+-/*
+- * deal with unrepresentable constant logarithms
+- */
+-extern __attribute__((const, noreturn))
+-int ____ilog2_NaN(void);
+-
+ /*
+  * non-constant log of base 2 calculators
+  * - the arch may override these in asm/bitops.h if they can be implemented
+@@ -85,7 +79,7 @@ unsigned long __rounddown_pow_of_two(unsigned long n)
+ #define ilog2(n)				\
+ (						\
+ 	__builtin_constant_p(n) ? (		\
+-		(n) < 1 ? ____ilog2_NaN() :	\
++		(n) < 2 ? 0 :			\
+ 		(n) & (1ULL << 63) ? 63 :	\
+ 		(n) & (1ULL << 62) ? 62 :	\
+ 		(n) & (1ULL << 61) ? 61 :	\
+@@ -148,10 +142,7 @@ unsigned long __rounddown_pow_of_two(unsigned long n)
+ 		(n) & (1ULL <<  4) ?  4 :	\
+ 		(n) & (1ULL <<  3) ?  3 :	\
+ 		(n) & (1ULL <<  2) ?  2 :	\
+-		(n) & (1ULL <<  1) ?  1 :	\
+-		(n) & (1ULL <<  0) ?  0 :	\
+-		____ilog2_NaN()			\
+-				   ) :		\
++		1 ) :				\
+ 	(sizeof(n) <= 4) ?			\
+ 	__ilog2_u32(n) :			\
+ 	__ilog2_u64(n)				\
+diff --git a/scripts/dtc/dtc-lexer.l b/scripts/dtc/dtc-lexer.l
+index 3b41bfca..9b9c29e6 100644
+--- a/scripts/dtc/dtc-lexer.l
++++ b/scripts/dtc/dtc-lexer.l
+@@ -39,7 +39,7 @@ LINECOMMENT	"//".*\n
+ #include "srcpos.h"
+ #include "dtc-parser.tab.h"
+ 
+-YYLTYPE yylloc;
++extern YYLTYPE yylloc;
+ 
+ /* CAUTION: this will stop working if we ever use yyless() or yyunput() */
+ #define	YY_USER_ACTION \
+diff --git a/scripts/dtc/dtc-lexer.lex.c_shipped b/scripts/dtc/dtc-lexer.lex.c_shipped
+index 2d30f417..d0eb405c 100644
+--- a/scripts/dtc/dtc-lexer.lex.c_shipped
++++ b/scripts/dtc/dtc-lexer.lex.c_shipped
+@@ -637,7 +637,7 @@ char *yytext;
+ #include "srcpos.h"
+ #include "dtc-parser.tab.h"
+ 
+-YYLTYPE yylloc;
++extern YYLTYPE yylloc;
+ 
+ /* CAUTION: this will stop working if we ever use yyless() or yyunput() */
+ #define	YY_USER_ACTION \
+diff --git a/scripts/sortextable.c b/scripts/sortextable.c
+index 1f10e89d..f7e582f8 100644
+--- a/scripts/sortextable.c
++++ b/scripts/sortextable.c
+@@ -1,324 +1 @@
+-/*
+- * sortextable.c: Sort the kernel's exception table
+- *
+- * Copyright 2011 - 2012 Cavium, Inc.
+- *
+- * Based on code taken from recortmcount.c which is:
+- *
+- * Copyright 2009 John F. Reiser <jreiser@BitWagon.com>.  All rights reserved.
+- * Licensed under the GNU General Public License, version 2 (GPLv2).
+- *
+- * Restructured to fit Linux format, as well as other updates:
+- *  Copyright 2010 Steven Rostedt <srostedt@redhat.com>, Red Hat Inc.
+- */
+-
+-/*
+- * Strategy: alter the vmlinux file in-place.
+- */
+-
+-#include <sys/types.h>
+-#include <sys/mman.h>
+-#include <sys/stat.h>
+-#include <getopt.h>
+-#include <elf.h>
+-#include <fcntl.h>
+-#include <setjmp.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <string.h>
+-#include <unistd.h>
+-
+-#include <tools/be_byteshift.h>
+-#include <tools/le_byteshift.h>
+-
+-static int fd_map;	/* File descriptor for file being modified. */
+-static int mmap_failed; /* Boolean flag. */
+-static void *ehdr_curr; /* current ElfXX_Ehdr *  for resource cleanup */
+-static struct stat sb;	/* Remember .st_size, etc. */
+-static jmp_buf jmpenv;	/* setjmp/longjmp per-file error escape */
+-
+-/* setjmp() return values */
+-enum {
+-	SJ_SETJMP = 0,  /* hardwired first return */
+-	SJ_FAIL,
+-	SJ_SUCCEED
+-};
+-
+-/* Per-file resource cleanup when multiple files. */
+-static void
+-cleanup(void)
+-{
+-	if (!mmap_failed)
+-		munmap(ehdr_curr, sb.st_size);
+-	close(fd_map);
+-}
+-
+-static void __attribute__((noreturn))
+-fail_file(void)
+-{
+-	cleanup();
+-	longjmp(jmpenv, SJ_FAIL);
+-}
+-
+-static void __attribute__((noreturn))
+-succeed_file(void)
+-{
+-	cleanup();
+-	longjmp(jmpenv, SJ_SUCCEED);
+-}
+-
+-
+-/*
+- * Get the whole file as a programming convenience in order to avoid
+- * malloc+lseek+read+free of many pieces.  If successful, then mmap
+- * avoids copying unused pieces; else just read the whole file.
+- * Open for both read and write.
+- */
+-static void *mmap_file(char const *fname)
+-{
+-	void *addr;
+-
+-	fd_map = open(fname, O_RDWR);
+-	if (fd_map < 0 || fstat(fd_map, &sb) < 0) {
+-		perror(fname);
+-		fail_file();
+-	}
+-	if (!S_ISREG(sb.st_mode)) {
+-		fprintf(stderr, "not a regular file: %s\n", fname);
+-		fail_file();
+-	}
+-	addr = mmap(0, sb.st_size, PROT_READ|PROT_WRITE, MAP_SHARED,
+-		    fd_map, 0);
+-	if (addr == MAP_FAILED) {
+-		mmap_failed = 1;
+-		fprintf(stderr, "Could not mmap file: %s\n", fname);
+-		fail_file();
+-	}
+-	return addr;
+-}
+-
+-static uint64_t r8be(const uint64_t *x)
+-{
+-	return get_unaligned_be64(x);
+-}
+-static uint32_t rbe(const uint32_t *x)
+-{
+-	return get_unaligned_be32(x);
+-}
+-static uint16_t r2be(const uint16_t *x)
+-{
+-	return get_unaligned_be16(x);
+-}
+-static uint64_t r8le(const uint64_t *x)
+-{
+-	return get_unaligned_le64(x);
+-}
+-static uint32_t rle(const uint32_t *x)
+-{
+-	return get_unaligned_le32(x);
+-}
+-static uint16_t r2le(const uint16_t *x)
+-{
+-	return get_unaligned_le16(x);
+-}
+-
+-static void w8be(uint64_t val, uint64_t *x)
+-{
+-	put_unaligned_be64(val, x);
+-}
+-static void wbe(uint32_t val, uint32_t *x)
+-{
+-	put_unaligned_be32(val, x);
+-}
+-static void w2be(uint16_t val, uint16_t *x)
+-{
+-	put_unaligned_be16(val, x);
+-}
+-static void w8le(uint64_t val, uint64_t *x)
+-{
+-	put_unaligned_le64(val, x);
+-}
+-static void wle(uint32_t val, uint32_t *x)
+-{
+-	put_unaligned_le32(val, x);
+-}
+-static void w2le(uint16_t val, uint16_t *x)
+-{
+-	put_unaligned_le16(val, x);
+-}
+-
+-static uint64_t (*r8)(const uint64_t *);
+-static uint32_t (*r)(const uint32_t *);
+-static uint16_t (*r2)(const uint16_t *);
+-static void (*w8)(uint64_t, uint64_t *);
+-static void (*w)(uint32_t, uint32_t *);
+-static void (*w2)(uint16_t, uint16_t *);
+-
+-typedef void (*table_sort_t)(char *, int);
+-
+-/* 32 bit and 64 bit are very similar */
+-#include "sortextable.h"
+-#define SORTEXTABLE_64
+-#include "sortextable.h"
+-
+-static int compare_relative_table(const void *a, const void *b)
+-{
+-	int32_t av = (int32_t)r(a);
+-	int32_t bv = (int32_t)r(b);
+-
+-	if (av < bv)
+-		return -1;
+-	if (av > bv)
+-		return 1;
+-	return 0;
+-}
+-
+-static void sort_relative_table(char *extab_image, int image_size)
+-{
+-	int i;
+-
+-	/*
+-	 * Do the same thing the runtime sort does, first normalize to
+-	 * being relative to the start of the section.
+-	 */
+-	i = 0;
+-	while (i < image_size) {
+-		uint32_t *loc = (uint32_t *)(extab_image + i);
+-		w(r(loc) + i, loc);
+-		i += 4;
+-	}
+-
+-	qsort(extab_image, image_size / 8, 8, compare_relative_table);
+-
+-	/* Now denormalize. */
+-	i = 0;
+-	while (i < image_size) {
+-		uint32_t *loc = (uint32_t *)(extab_image + i);
+-		w(r(loc) - i, loc);
+-		i += 4;
+-	}
+-}
+-
+-static void
+-do_file(char const *const fname)
+-{
+-	table_sort_t custom_sort;
+-	Elf32_Ehdr *ehdr = mmap_file(fname);
+-
+-	ehdr_curr = ehdr;
+-	switch (ehdr->e_ident[EI_DATA]) {
+-	default:
+-		fprintf(stderr, "unrecognized ELF data encoding %d: %s\n",
+-			ehdr->e_ident[EI_DATA], fname);
+-		fail_file();
+-		break;
+-	case ELFDATA2LSB:
+-		r = rle;
+-		r2 = r2le;
+-		r8 = r8le;
+-		w = wle;
+-		w2 = w2le;
+-		w8 = w8le;
+-		break;
+-	case ELFDATA2MSB:
+-		r = rbe;
+-		r2 = r2be;
+-		r8 = r8be;
+-		w = wbe;
+-		w2 = w2be;
+-		w8 = w8be;
+-		break;
+-	}  /* end switch */
+-	if (memcmp(ELFMAG, ehdr->e_ident, SELFMAG) != 0
+-	||  r2(&ehdr->e_type) != ET_EXEC
+-	||  ehdr->e_ident[EI_VERSION] != EV_CURRENT) {
+-		fprintf(stderr, "unrecognized ET_EXEC file %s\n", fname);
+-		fail_file();
+-	}
+-
+-	custom_sort = NULL;
+-	switch (r2(&ehdr->e_machine)) {
+-	default:
+-		fprintf(stderr, "unrecognized e_machine %d %s\n",
+-			r2(&ehdr->e_machine), fname);
+-		fail_file();
+-		break;
+-	case EM_386:
+-	case EM_X86_64:
+-	case EM_S390:
+-		custom_sort = sort_relative_table;
+-		break;
+-	case EM_ARM:
+-	case EM_MIPS:
+-		break;
+-	}  /* end switch */
+-
+-	switch (ehdr->e_ident[EI_CLASS]) {
+-	default:
+-		fprintf(stderr, "unrecognized ELF class %d %s\n",
+-			ehdr->e_ident[EI_CLASS], fname);
+-		fail_file();
+-		break;
+-	case ELFCLASS32:
+-		if (r2(&ehdr->e_ehsize) != sizeof(Elf32_Ehdr)
+-		||  r2(&ehdr->e_shentsize) != sizeof(Elf32_Shdr)) {
+-			fprintf(stderr,
+-				"unrecognized ET_EXEC file: %s\n", fname);
+-			fail_file();
+-		}
+-		do32(ehdr, fname, custom_sort);
+-		break;
+-	case ELFCLASS64: {
+-		Elf64_Ehdr *const ghdr = (Elf64_Ehdr *)ehdr;
+-		if (r2(&ghdr->e_ehsize) != sizeof(Elf64_Ehdr)
+-		||  r2(&ghdr->e_shentsize) != sizeof(Elf64_Shdr)) {
+-			fprintf(stderr,
+-				"unrecognized ET_EXEC file: %s\n", fname);
+-			fail_file();
+-		}
+-		do64(ghdr, fname, custom_sort);
+-		break;
+-	}
+-	}  /* end switch */
+-
+-	cleanup();
+-}
+-
+-int
+-main(int argc, char *argv[])
+-{
+-	int n_error = 0;  /* gcc-4.3.0 false positive complaint */
+-	int i;
+-
+-	if (argc < 2) {
+-		fprintf(stderr, "usage: sortextable vmlinux...\n");
+-		return 0;
+-	}
+-
+-	/* Process each file in turn, allowing deep failure. */
+-	for (i = 1; i < argc; i++) {
+-		char *file = argv[i];
+-		int const sjval = setjmp(jmpenv);
+-
+-		switch (sjval) {
+-		default:
+-			fprintf(stderr, "internal error: %s\n", file);
+-			exit(1);
+-			break;
+-		case SJ_SETJMP:    /* normal sequence */
+-			/* Avoid problems if early cleanup() */
+-			fd_map = -1;
+-			ehdr_curr = NULL;
+-			mmap_failed = 1;
+-			do_file(file);
+-			break;
+-		case SJ_FAIL:    /* error in do_file or below */
+-			++n_error;
+-			break;
+-		case SJ_SUCCEED:    /* premature success */
+-			/* do nothing */
+-			break;
+-		}  /* end switch */
+-	}
+-	return !!n_error;
+-}
++int main(void){return 0;}

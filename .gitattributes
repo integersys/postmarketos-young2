@@ -1,0 +1,9 @@
+userspace/** text eol=lf
+scripts/build/** text eol=lf
+scripts/setup/** text eol=lf
+linux-samsung-young23g/** text eol=lf
+docs/01-status.md -text
+docs/02-troubleshooting.md -text
+linux-samsung-young23g/**/*.patch -whitespace
+device-samsung-young23g/** text eol=lf
+scripts/*.start text eol=lf

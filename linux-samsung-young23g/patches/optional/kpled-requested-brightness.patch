@@ -1,0 +1,39 @@
+diff --git a/drivers/leds/leds-sprd-kb.c b/drivers/leds/leds-sprd-kb.c
+index d366588a..2910ec9d 100644
+--- a/drivers/leds/leds-sprd-kb.c
++++ b/drivers/leds/leds-sprd-kb.c
+@@ -40,6 +40,17 @@
+ #define PRINT_ERR(format,x...)  printk(KERN_ERR "[SPRD_KPLED_ERR] func: %s  line: %04d  info: " format, __func__, __LINE__, ## x)
+ #endif
+ 
++/*
++ * The original SCX35-first order is CORRECT for this chip. It yields
++ * SPRD_MISC_BASE + 0x8800 = 0xF53F8800, which is the analog GLB block
++ * (physical 0x40038800), and with the SCX15 KPLED offset 0xE0 the register
++ * is 0xF53F88E0 - exactly what the authoritative header says:
++ *   chip_x15/__regs_ana_apb_if.h: ANA_REG_GLB_KPLED_CTRL = GLB_BASE + 0xE0
++ *   chip_x15/__mmap.h:            ANA_REGS_GLB_BASE = SCI_IOMAP(0x40038800)
++ * A previous attempt to "fix" this by preferring the SCX15 base produced
++ * 0xF53F06E0, which is OUTSIDE the ADI window [0xF53F8000, +4K) and made
++ * sci_adi_read/write WARN "Maybe ADI vaddr is wrong?!!". Reverted.
++ */
+ #ifdef CONFIG_ARCH_SCX35
+ #define SPRD_ANA_BASE 	        (SPRD_MISC_BASE + 0x8800)
+ #else
+@@ -113,7 +124,15 @@ static void sprd_kpled_set_brightness( unsigned long  brightness)
+ #ifdef CONFIG_ARCH_SCX35
+ 	/*brightness steps = 16*/
+ 	brightness_level = brightness_level/16;
+-	brightness_level = 0;//set brightness_level = 0 for reducing power consumption
++	/*
++	 * The vendor code forced brightness_level = 0 here "for reducing power
++	 * consumption", which discarded the requested keypad-brightness
++	 * value from userspace: every sysfs brightness write ended with the LED
++	 * control register at 0x00000000. brightness_level is already clamped to
++	 * 255 above and divided by 16, so it can only be 0..15 - exactly the range
++	 * KPLED_V_MSK (0x0F << KPLED_V_SHIFT) accepts. Removed so the requested
++	 * level actually reaches the hardware; 0 still means off.
++	 */
+ #else
+ 	/*brightness steps = 8*/
+ 	brightness_level = brightness_level/32;

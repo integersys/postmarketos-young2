@@ -1,0 +1,33 @@
+# Minimal sprdfb fix: report the physically correct RGB bitfields for 32 bpp.
+# Affected file: drivers/video/sprdfb/sprdfb_main.c
+# Function:      setup_fb_info()
+#
+# Why: the DISPC OSD is programmed with data format 3 (ABGR) AND the
+#      'rb switch' bit (1 << 15) set (see sprdfb_dispc.c), so the memory
+#      layout actually consumed by the hardware is byte0=R byte1=G byte2=B.
+#      fb_var_screeninfo advertised the opposite (R at bit 24), which only
+#      affects userspace (Xorg, fbset) and made Xorg write swapped channels.
+#
+# NOT BUILT AND NOT FLASHED. Prepared for review only.
+
+--- a/drivers/video/sprdfb/sprdfb_main.c
++++ b/drivers/video/sprdfb/sprdfb_main.c
+@@ -215,14 +215,14 @@
+ 	fb->var.yoffset = 0;
+ 
+ 	/* only support two pixel format */
+-	if (dev->bpp == 32) { /* ABGR */
+-		fb->var.red.offset     = 24;
++	if (dev->bpp == 32) { /* ABGR + rb switch -> memory layout R G B X */
++		fb->var.red.offset     = 0;
+ 		fb->var.red.length     = 8;
+ 		fb->var.red.msb_right  = 0;
+-		fb->var.green.offset   = 16;
++		fb->var.green.offset   = 8;
+ 		fb->var.green.length   = 8;
+ 		fb->var.green.msb_right = 0;
+-		fb->var.blue.offset    = 8;
++		fb->var.blue.offset    = 16;
+ 		fb->var.blue.length    = 8;
+ 		fb->var.blue.msb_right = 0;
+ 	} else { /*BGR*/
