@@ -1,0 +1,59 @@
+#!/bin/sh
+# 50-snd-nodes.start
+#
+# Create /dev/snd/* for every ALSA device the kernel registered.
+#
+# WHY THIS IS NEEDED
+#   The running kernel is the 2016 vendor/downstream build with CONFIG_DEVTMPFS
+#   unset, so the kernel cannot create /dev nodes. eudev is installed and enabled
+#   but /etc/init.d/udev start_pre() refuses to run without devtmpfs and falls
+#   back to mounting a plain tmpfs on /dev. Therefore NOTHING is auto-populated
+#   and every node must be created by hand - exactly the same cause already
+#   solved for /dev/fb0 (98-fb0-node.start) and /dev/input (97-input-nodes.start).
+#
+#   The ALSA subsystem IS present and working: /proc/devices lists "116 alsa",
+#   /proc/asound exists with 4 cards, and /sys/class/sound exposes the devices.
+#   Only the /dev nodes were missing - which is why `aplay -l` said
+#   "no soundcards found..." before this script existed.
+#
+# MAJOR/MINOR
+#   Read from /sys/class/sound/*/dev for the CURRENT boot. Never hardcode 116:x.
+#   (The ALSA core major happens to be 116 here, but minors are derived from
+#   card/device indices and are read dynamically anyway.)
+#
+# IDEMPOTENT: an existing node is left alone (never re-created over a live node).
+# FAIL-SAFE : never fails the boot; exits 0 even if there is no sound hardware.
+#
+# REVERT
+#   rm /etc/local.d/50-snd-nodes.start
+#
+# EVIDENCE / FULL ANALYSIS
+#   drivers/audio/documentation/2026-10-03_13-49_audio-bringup/
+#
+# ORDERING: local.d runs files in lexical order. This runs after the early
+#   00-dev-fix / 10-rndis-ssh-rescue scripts and before 97/98/99.
+
+SND=/sys/class/sound
+[ -d "$SND" ] || exit 0
+
+mkdir -p /dev/snd 2>/dev/null
+
+for d in "$SND"/*; do
+	[ -e "$d" ] || continue
+	n=$(basename "$d")
+	case "$n" in
+		controlC*|pcmC*|timer|seq|hwdep|midiC*) ;;
+		*) continue ;;
+	esac
+	[ -f "$d/dev" ] || continue
+	devdata=$(cat "$d/dev" 2>/dev/null) || continue
+	maj=${devdata%%:*}
+	min=${devdata##*:}
+	[ -n "$maj" ] && [ -n "$min" ] || continue
+	if [ ! -e "/dev/snd/$n" ]; then
+		mknod "/dev/snd/$n" c "$maj" "$min" 2>/dev/null
+	fi
+	chmod 666 "/dev/snd/$n" 2>/dev/null
+done
+
+exit 0

@@ -1,0 +1,79 @@
+#!/bin/sh
+# 51-audio-route.start
+#
+# Apply the proven Young2 (sprdphone / vbc-r2p0-sprd-codec-v3) ALSA routing at boot.
+#
+# WHY THIS IS NEEDED
+#   The codec-v3 driver registers all 104 mixer controls but powers up with every
+#   route OFF and every gain at 0. Nothing is audible or recordable until the
+#   routing is set. The CM11 tinyalsa HAL did this from
+#   /system/etc/tiny_hw.xml + codec_pga.xml; there is no equivalent HAL here, so
+#   the equivalent control writes are applied directly with amixer.
+#
+#   Control names below are taken verbatim from the CM11 reference files for THIS
+#   device (cm-11/system/etc/tiny_hw.xml, codec_pga.xml) and were verified to
+#   exist 1:1 in the live mixer (all 46 tiny_hw.xml names matched, 0 missing).
+#
+# VALUES
+#   Gains are deliberately BELOW the Android values so the first sound out of the
+#   speaker is never loud. Android uses DACL/DACR=7, SPKL/SPKR=10.
+#
+#   IMPORTANT - do NOT raise 'VBC ADCL/ADCR DG Set' above 63.
+#   The driver declares max 127 (VBC_DG_VAL_MAX) and writes the register as
+#   `0x80 | (0xFF & dg)`, but bit 6 of that byte is not part of the gain field on
+#   this hardware. Measured: dg=60 works, dg=100 and dg=127 make the capture path
+#   go silent (rms 0.8 vs 100+). Safe range is 0..63.
+#
+# IDEMPOTENT: re-applying is harmless. FAIL-SAFE: exits 0 with no sound card.
+#
+# REVERT
+#   rm /etc/local.d/51-audio-route.start
+#   (then reboot, or re-run with the values from
+#    drivers/audio/evidence/mixer/2026-10-03_baseline-asound.state)
+#
+# EVIDENCE / FULL ANALYSIS
+#   drivers/audio/documentation/2026-10-03_13-49_audio-bringup/
+
+CARD=0
+# wait briefly for the card to appear (the /dev nodes come from 50-snd-nodes.start)
+i=0
+while [ $i -lt 20 ]; do
+	[ -r /dev/snd/controlC$CARD ] && break
+	i=$((i + 1))
+	sleep 0.5
+done
+[ -r /dev/snd/controlC$CARD ] || exit 0
+
+C() { amixer -c "$CARD" cset name="$1" "$2" >/dev/null 2>&1; }
+
+# ---------------------------------------------------------------------------
+# PLAYBACK -> built-in speaker
+#   DACL/DACR -> SPKL Mixer (DACLSPKL/DACRSPKL) -> SPKL Switch -> AOL -> Ext Spk
+#   Speaker Function also enables the internal speaker PA (inter Spk PA).
+# ---------------------------------------------------------------------------
+C 'DACL Playback Volume' 4
+C 'DACR Playback Volume' 4
+C 'SPKL Playback Volume' 8
+C 'SPKR Playback Volume' 8
+C 'SPKL Mixer DACLSPKL Switch' on
+C 'SPKL Mixer DACRSPKL Switch' on
+C 'Speaker Mute' off
+C 'Speaker Function' on
+
+# ---------------------------------------------------------------------------
+# CAPTURE <- built-in microphone
+#   MIC -> MIC Boost -> ADCL/ADCR Mixer (MainMICADCL/MainMICADCR) -> ADC -> VBC
+# ---------------------------------------------------------------------------
+C 'ADCL Capture Volume' 63
+C 'ADCR Capture Volume' 63
+C 'MIC Boost' 3
+C 'MIC Bias Switch' on
+C 'ADCL Mixer MainMICADCL Switch' on
+C 'ADCR Mixer MainMICADCR Switch' on
+C 'Mic Function' on
+C 'VBC ADCL DG Set' 60
+C 'VBC ADCR DG Set' 60
+C 'VBC ADCL DG Switch' on
+C 'VBC ADCR DG Switch' on
+
+exit 0

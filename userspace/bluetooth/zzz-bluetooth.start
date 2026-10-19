@@ -1,0 +1,242 @@
+#!/bin/sh
+# zzz-bluetooth.start
+#
+# Bring up the internal Broadcom BCM4343A0 Bluetooth on every normal boot.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS IS NEEDED
+# ---------------------------------------------------------------------------
+# The kernel now has CONFIG_BT_HCIUART=y + CONFIG_BT_HCIUART_H4=y, so the N_HCI
+# line discipline (15) exists — but nothing creates hci0. On this platform the
+# controller is an external Broadcom chip on the AP UART (/dev/ttyS0) whose
+# firmware must be uploaded over that UART at every power-on. That is what
+# BlueZ's `hciattach ... bcm43xx` does. Without it there is no hci0 at all.
+#
+# ---------------------------------------------------------------------------
+# WHY "zzz-" (runs LAST)
+# ---------------------------------------------------------------------------
+# /etc/local.d runs *.start in lexical order, and the `local` service declares
+# `after *` with `keyword -timeout`, so it runs after the rest of the default
+# runlevel and cannot block the boot. By then:
+#   * /dev is populated by devtmpfs (CONFIG_DEVTMPFS=y on this kernel)
+#   * /dev/ttyS0 exists (serial_sprd, char 4:64) — created by the kernel, not here
+#   * /dev/rfkill exists (52-rfkill-node.start runs earlier: "52" < "zzz")
+#   * the rootfs (and therefore /lib/firmware) is mounted
+#   * Wi-Fi (zzz-wifi.start) has already been launched
+#
+# ---------------------------------------------------------------------------
+# WHY setsid ... &  AND NOT hciattach's OWN DAEMON MODE
+# ---------------------------------------------------------------------------
+# hciattach forks itself into the background UNLESS -n is given, and when it
+# daemonises it calls daemon(0,0), which redirects stdio to /dev/null — so all of
+# its firmware-upload diagnostics are LOST, exactly the information needed to
+# debug a failed boot.
+#
+# `setsid hciattach -n ... &` gives us both: the process gets its own session so
+# it survives this script exiting (and therefore the `local` service exiting),
+# AND its stdout/stderr stay redirected into our log file.
+#
+# hciattach MUST keep running: it is not a one-shot uploader, it is the HCI
+# transport itself. If it exits, hci0 disappears.
+#
+# ---------------------------------------------------------------------------
+# PARAMETERS — these are the PHYSICALLY PROVEN values. DO NOT CHANGE THEM.
+# ---------------------------------------------------------------------------
+#   tty            /dev/ttyS0
+#   protocol       bcm43xx
+#   initial speed  115200      (-s 115200)
+#   final speed    115200
+#   flow           RTS/CTS ENABLED (`flow`) — MANDATORY: without it the
+#                  controller never answers
+#   sleep mode     `nosleep`
+#
+# ---------------------------------------------------------------------------
+# SAFETY
+# ---------------------------------------------------------------------------
+#   * Never touches Wi-Fi, rndis0, or the 172.16.42.0/24 SSH route.
+#   * Never unbinds/rebinds bcmdhd_wlan (that hard-crashed this phone before).
+#   * Bounded waits only — no infinite loops, no unbounded boot delay.
+#   * Always exits 0: a Bluetooth failure must never fail the boot.
+#
+# REVERT
+#   rm /etc/local.d/zzz-bluetooth.start
+#   rm -f /lib/firmware/4343A0.hcd        # optional, the symlink is harmless
+#   rm -f /var/log/young2-bluetooth.log
+#   (then reboot, or: kill the hciattach process and `hciconfig hci0 down`)
+#
+# EVIDENCE / FULL ANALYSIS
+#   drivers/bluetooth/documentation/2026-10-05_bluetooth-persistence/
+
+LOG=/var/log/young2-bluetooth.log
+TTY=/dev/ttyS0
+HCD_REAL=/lib/firmware/BCM4343A0_001.001.034.0038.0090_ORC_Vivalto-3G_3MC.hcd
+HCD_LINK=/lib/firmware/4343A0.hcd
+HCD_SHA=312c196f94eb0c04296a8b46626ba0e636228f4222d722e051383d2bc9af5d97
+
+# Keep the log bounded: rotate once when it passes 256 KiB.
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 262144 ]; then
+	mv -f "$LOG" "$LOG.1" 2>/dev/null
+fi
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >>"$LOG"; }
+
+log "=== bluetooth-start begin (boot) ==="
+
+# ---------------------------------------------------------------------------
+# 1. firmware: verify the real HCD and make sure the compatibility symlink exists
+# ---------------------------------------------------------------------------
+# BlueZ's hciattach builds the firmware filename from the controller's ROM local
+# name, which on this chip is "4343A0". The Samsung blob is named
+# "BCM4343A0_...". The symlink bridges the two.
+if [ ! -f "$HCD_REAL" ]; then
+	log "FATAL: firmware $HCD_REAL is missing — cannot continue"
+	exit 0
+fi
+if [ -f "$HCD_LINK" ]; then
+	log "firmware symlink already present: $(readlink "$HCD_LINK")"
+else
+	ln -sf "$HCD_REAL" "$HCD_LINK" 2>/dev/null
+	log "created firmware symlink $HCD_LINK -> $HCD_REAL"
+fi
+# Verify the bytes actually resolve to the known-good blob.
+GOT=$(sha256sum "$HCD_LINK" 2>/dev/null | cut -d' ' -f1)
+if [ "$GOT" = "$HCD_SHA" ]; then
+	log "firmware sha256 OK ($HCD_SHA)"
+else
+	log "WARNING: firmware sha256 is '$GOT', expected '$HCD_SHA' (continuing)"
+fi
+
+# ---------------------------------------------------------------------------
+# 2. rfkill: POWER-CYCLE the chip so it reports its ROM local name
+# ---------------------------------------------------------------------------
+# This is not a plain "unblock" — it is a deliberate power cycle, and it matters.
+#
+# hciattach chooses its firmware file from the controller's LOCAL NAME: it reads
+# the name and then opens /lib/firmware/<name>.hcd. On a bare ROM that name is
+# "4343A0", which our symlink satisfies. But bluetoothd SETS the local name to
+# "BlueZ 5.87", and that value lives in the controller until it loses power. If
+# the chip were still carrying "BlueZ 5.87" when hciattach ran, hciattach would
+# log "Patch not found for BlueZ 5.87, continue anyway", upload NO patchram, and
+# leave a ROM-only controller behind.
+#
+# Driving the rfkill GPIO low removes the chip's power, so the next start always
+# reports the ROM name. PROVEN SAFE FOR WI-FI: the shared WLAN_REG rail stays High
+# throughout (dmesg: "bcm_bt_rfkill_setpower: now vreg: Low [POWER_OFF]
+# WLAN_REG:High [POWER ON]"), and wlan0 was verified still associated afterwards.
+if [ -x /usr/sbin/rfkill ]; then
+	rfkill block bluetooth 2>>"$LOG"
+	sleep 2
+	rfkill unblock bluetooth 2>>"$LOG"
+	sleep 2
+	log "BT chip power-cycled (rfkill block+unblock) so it reports its ROM local name"
+else
+	log "WARNING: no rfkill utility; the chip may keep a stale local name"
+fi
+
+# ---------------------------------------------------------------------------
+# 3. already up? then do nothing (idempotent)
+# ---------------------------------------------------------------------------
+if pgrep -f "hciattach.*$TTY" >/dev/null 2>&1 && [ -d /sys/class/bluetooth/hci0 ]; then
+	log "hciattach already running and hci0 exists — nothing to do"
+	exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# 4. wait (bounded, 15 s) for the UART device node
+# ---------------------------------------------------------------------------
+i=0
+while [ $i -lt 15 ] && [ ! -c "$TTY" ]; do
+	sleep 1
+	i=$((i + 1))
+done
+if [ ! -c "$TTY" ]; then
+	log "FATAL: $TTY did not appear within 15 s — aborting (RNDIS/Wi-Fi untouched)"
+	exit 0
+fi
+log "$TTY present after ${i}s"
+
+# ---------------------------------------------------------------------------
+# 5. clear stale state (recovery path only — a normal boot never reaches here)
+# ---------------------------------------------------------------------------
+if pgrep -f "hciattach.*$TTY" >/dev/null 2>&1; then
+	log "a stale hciattach for $TTY exists but hci0 is missing — restarting it"
+	pkill -f "hciattach.*$TTY" 2>/dev/null
+	sleep 2
+	# The chip may still hold the name bluetoothd set; power-cycle again so the
+	# patch lookup cannot fail.
+	if [ -x /usr/sbin/rfkill ]; then
+		log "power-cycling the BT chip again to clear any stale local name"
+		rfkill block bluetooth 2>>"$LOG"
+		sleep 2
+		rfkill unblock bluetooth 2>>"$LOG"
+		sleep 2
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# 6. start the transport (detached, own session, output captured)
+# ---------------------------------------------------------------------------
+log "starting: hciattach -n -t 60 -s 115200 $TTY bcm43xx 115200 flow nosleep"
+setsid hciattach -n -t 60 -s 115200 "$TTY" bcm43xx 115200 flow nosleep \
+	</dev/null >>"$LOG" 2>&1 &
+
+# ---------------------------------------------------------------------------
+# 7. wait (bounded, 20 s) for hci0 to appear
+# ---------------------------------------------------------------------------
+i=0
+while [ $i -lt 20 ] && [ ! -d /sys/class/bluetooth/hci0 ]; do
+	sleep 1
+	i=$((i + 1))
+done
+if [ ! -d /sys/class/bluetooth/hci0 ]; then
+	log "FAILED: hci0 did not appear within 20 s — see the hciattach output above"
+	log "=== bluetooth-start end (FAILED, boot unaffected) ==="
+	exit 0
+fi
+log "hci0 appeared after ${i}s"
+
+# ---------------------------------------------------------------------------
+# 8. bring hci0 up
+# ---------------------------------------------------------------------------
+hciconfig hci0 up >>"$LOG" 2>&1
+sleep 1
+log "hciconfig hci0 up -> $(hciconfig hci0 2>/dev/null | sed -n '3p' | tr -s ' ')"
+
+# ---------------------------------------------------------------------------
+# 8b. RECORD THE FIRMWARE IDENTITY — must be read BEFORE bluetoothd starts,
+#     because bluetoothd overwrites the controller's local name with "BlueZ 5.87".
+# ---------------------------------------------------------------------------
+# On the bare ROM the local name is "4343A0" and HCI Revision is 0x0000.
+# With the Samsung HCD loaded the local name is
+# "BCM4343A0-26MHz Vivalto-3G 3M(SM-G313H)-0038" and the revision is 0x5a.
+# This is the proof that the patchram actually loaded.
+# (`hciconfig` is used rather than `hcitool cmd 0x04 0x0014`, which this
+#  controller answers with status 0x01 while bluetoothd is starting.)
+FWINFO=$(hciconfig hci0 -a 2>/dev/null)
+FWNAME=$(echo "$FWINFO" | sed -n 's/^[[:space:]]*Name: //p')
+FWREV=$(echo "$FWINFO" | sed -n 's/.*Revision: \(0x[0-9a-fA-F]*\).*/\1/p')
+FWSUBMAN=$(echo "$FWINFO" | sed -n 's/.*Subversion: \(0x[0-9a-fA-F]*\).*/\1/p')
+log "controller local name: $FWNAME"
+log "controller HCI revision: $FWREV   LMP subversion: $FWSUBMAN"
+if echo "$FWNAME" | grep -qi "BCM4343A0"; then
+	log "FIRMWARE OK: Samsung HCD patchram is loaded"
+else
+	log "WARNING: local name '$FWNAME' does not look like the patched BCM4343A0 identity"
+	log "         (the controller may still be running bare ROM — no patchram)"
+fi
+
+# ---------------------------------------------------------------------------
+# 9. start bluetoothd (prefer the packaged OpenRC service)
+# ---------------------------------------------------------------------------
+if pgrep -f "/usr/lib/bluetooth/bluetoothd" >/dev/null 2>&1; then
+	log "bluetoothd already running"
+elif [ -x /etc/init.d/bluetooth ]; then
+	rc-service bluetooth start >>"$LOG" 2>&1
+	log "rc-service bluetooth start rc=$?"
+else
+	setsid /usr/lib/bluetooth/bluetoothd </dev/null >>"$LOG" 2>&1 &
+	log "started bluetoothd directly (no OpenRC service found)"
+fi
+
+log "=== bluetooth-start end (OK) ==="
+exit 0

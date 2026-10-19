@@ -1,0 +1,73 @@
+#!/bin/sh
+# 61-young2-volume.start
+#
+# Start the physical volume-button policy daemon.
+#
+# WHY
+#   The volume keys are on the keypad matrix (board-young2.c:394/:395) and arrive
+#   as ordinary input events on /dev/input/event0, but nothing in this userspace
+#   acted on them - so the buttons did nothing. xfsettingsd has no volume
+#   bindings, there is no xfce4-volumed, and this image uses plain ALSA (no
+#   PulseAudio/PipeWire), so the policy lives in young2-volume.py.
+#
+# NUMBERING
+#   61- sits between 60-young2-powerkey.start and 70-young2-accel.start and does
+#   not collide with anything. It needs /dev/input/event0 and card 0; both are up
+#   well before local.d finishes, and the daemon retries if the device is late.
+#
+# ALSO STARTS THE OSD DAEMON
+#   The volume popup is an xfce4-notifyd notification. xfce4-notifyd has its own
+#   /etc/xdg/autostart entry, but starting it here too makes the OSD independent
+#   of session-autostart ordering; the guard below keeps it to one process.
+#
+# IDEMPOTENT: refuses to start a second copy of either daemon.
+#
+# REVERT
+#   rm /etc/local.d/61-young2-volume.start
+#   rm -f /usr/local/bin/young2-volume.py /var/log/young2-volume.log
+#   (then kill the daemon or reboot)
+#
+# EVIDENCE / FULL ANALYSIS
+#   drivers/audio/documentation/2026-10-07_volume-buttons/
+
+DAEMON=/usr/local/bin/young2-volume.py
+NOTIFYD=/usr/lib/xfce4/notifyd/xfce4-notifyd
+
+running() {
+	for p in /proc/[0-9]*; do
+		c=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)
+		case "$c" in
+			*"$1"*) return 0 ;;
+		esac
+	done
+	return 1
+}
+
+# --- notification daemon (for the volume OSD) --------------------------------
+if [ -x "$NOTIFYD" ] && ! running "xfce4-notifyd"; then
+	# needs the session bus; the GUI launcher exports it into the session env
+	P=$(pgrep -f 'xfce4-session' | head -1)
+	if [ -n "$P" ]; then
+		DBUS=$(tr '\0' '\n' < "/proc/$P/environ" 2>/dev/null | sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p')
+		DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS="$DBUS" XDG_RUNTIME_DIR=/tmp/runtime-root \
+			setsid "$NOTIFYD" </dev/null >/dev/null 2>&1 &
+	fi
+fi
+
+# --- the volume policy daemon ------------------------------------------------
+[ -x "$DAEMON" ] || exit 0
+if running "young2-volume.py"; then
+	exit 0
+fi
+
+# wait (bounded) for the keypad node
+i=0
+while [ $i -lt 30 ] && [ ! -e /dev/input/event0 ]; do
+	sleep 1
+	i=$((i + 1))
+done
+[ -e /dev/input/event0 ] || exit 0
+
+setsid python3 "$DAEMON" </dev/null >/dev/null 2>&1 &
+
+exit 0

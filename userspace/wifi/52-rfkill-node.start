@@ -1,0 +1,42 @@
+#!/bin/sh
+# 52-rfkill-node.start
+#
+# Create /dev/rfkill so the `rfkill` utility and wpa_supplicant can query/unblock
+# the WLAN and Bluetooth radios.
+#
+# WHY THIS IS NEEDED
+#   Exactly the same root cause as /dev/fb0, /dev/input and /dev/snd: the running
+#   2016 vendor kernel has CONFIG_DEVTMPFS unset, eudev refuses to run, /dev is a
+#   plain tmpfs and NOTHING is auto-populated.
+#
+#   rfkill is registered as a MISC device, not as its own class device, so
+#   /sys/class/rfkill/*/dev does NOT exist and the major/minor CANNOT be read from
+#   the rfkill class.  The correct dynamic source is /proc/misc, where the kernel
+#   lists the assigned misc minor for "rfkill" (observed minor 63 -> char 10:63).
+#   This script reads it from there; it never hardcodes the number.
+#
+# WITHOUT THIS
+#   Wi-Fi still works (the rfkill sysfs state is "unblocked"), but:
+#     * `rfkill list`  -> "cannot open /dev/rfkill"
+#     * wpa_supplicant -> "rfkill: Cannot open RFKILL control device"
+#
+# IDEMPOTENT and FAIL-SAFE: exits 0 even if there is no rfkill device.
+#
+# REVERT
+#   rm /etc/local.d/52-rfkill-node.start ; rm -f /dev/rfkill
+#
+# EVIDENCE / FULL ANALYSIS
+#   drivers/wifi/documentation/2026-10-03_16-05_wifi-bringup/
+
+[ -e /sys/class/rfkill ] || exit 0
+[ -e /dev/rfkill ] && exit 0
+
+# /proc/misc lines look like:  " 63 rfkill"
+MINOR=$(awk '$2 == "rfkill" { print $1; exit }' /proc/misc 2>/dev/null)
+[ -n "$MINOR" ] || exit 0
+
+# misc devices live on char major 10
+mknod /dev/rfkill c 10 "$MINOR" 2>/dev/null
+[ -e /dev/rfkill ] && chmod 666 /dev/rfkill 2>/dev/null
+
+exit 0
