@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""young2-accel - a visual accelerometer test for the Young 2 (K2HH).
+
+WHY
+  Reading raw numbers over SSH is a poor way to judge an accelerometer. This is a
+  GTK3 window you can look at ON THE PHONE: a bubble level plus live X/Y/Z, so
+  tilting the device visibly moves something.
+
+WHAT IT SHOWS
+  * a bubble-level circle: the dot is the gravity vector projected on the screen
+    plane, so it centres when the phone is flat and runs to the rim when the
+    phone is stood on an edge
+  * live raw X/Y/Z from /sys/class/sensors/accelerometer_sensor/raw_data
+  * the magnitude |a| (should sit near 16384 = 1 g when still)
+  * a plain-language orientation line derived from which axis carries the most
+    gravity, so the axis mapping can be read off directly
+  * a big axis-colour legend (X red, Y green, Z blue) with signed bars
+
+SIZE
+  Built for the 320x480 panel. Run it with:
+
+    DISPLAY=:0 young2-accel
+
+  or tap the "Accelerometer" launcher it installs.
+"""
+
+import os
+import sys
+import math
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, GLib  # noqa: E402
+
+RAW = "/sys/class/sensors/accelerometer_sensor/raw_data"
+ENABLE = "/sys/class/input/event3/device/enable"
+DELAY = "/sys/class/input/event3/device/poll_delay"
+SCALE = 16384.0          # LSB per g (14-bit, +/-2g range) - confirmed by Z=+1g flat
+INTERVAL_MS = 100
+
+
+def read_raw():
+    """Return (x, y, z) ints from the driver, or None."""
+    try:
+        with open(RAW) as f:
+            parts = f.read().strip().split(",")
+        if len(parts) != 3:
+            return None
+        return int(parts[0]), int(parts[1]), int(parts[2])
+    except Exception:
+        return None
+
+
+def sensor_set(attr_path, value):
+    try:
+        with open(attr_path, "w") as f:
+            f.write(str(value))
+        return True
+    except Exception:
+        return False
+
+
+class AccelWindow(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Accelerometer")
+        self.set_default_size(320, 480)
+        self.set_resizable(False)
+        self.set_decorated(False)
+        self.connect("destroy", Gtk.main_quit)
+        self.connect("key-press-event", self.on_key)
+
+        self.x = self.y = self.z = 0
+        self.samples = 0
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        vbox.set_margin_top(2)
+        vbox.set_margin_bottom(2)
+        vbox.set_margin_start(2)
+        vbox.set_margin_end(2)
+        self.add(vbox)
+
+        # --- title -------------------------------------------------------
+        title = Gtk.Label()
+        title.set_markup("<b>K2HH accelerometer</b>")
+        vbox.pack_start(title, False, False, 0)
+
+        # --- bubble level -------------------------------------------------
+        self.level = Gtk.DrawingArea()
+        self.level.set_size_request(300, 200)
+        self.level.connect("draw", self.draw_level)
+        vbox.pack_start(self.level, False, False, 0)
+
+        # --- numbers ------------------------------------------------------
+        self.xyz = Gtk.Label()
+        self.xyz.set_markup("<tt>X     0\nY     0\nZ     0</tt>")
+        vbox.pack_start(self.xyz, False, False, 0)
+
+        # --- bars ---------------------------------------------------------
+        self.bars = Gtk.DrawingArea()
+        self.bars.set_size_request(300, 70)
+        self.bars.connect("draw", self.draw_bars)
+        vbox.pack_start(self.bars, False, False, 0)
+
+        # --- interpretation ----------------------------------------------
+        self.info = Gtk.Label()
+        self.info.set_line_wrap(True)
+        vbox.pack_start(self.info, False, False, 0)
+
+        # --- controls -----------------------------------------------------
+        hb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        hb.set_homogeneous(True)
+        for label, cb in (("200ms", lambda w: self.set_delay(200)),
+                          ("50ms", lambda w: self.set_delay(50)),
+                          ("10ms", lambda w: self.set_delay(10)),
+                          ("Quit", lambda w: Gtk.main_quit())):
+            b = Gtk.Button(label=label)
+            b.connect("clicked", cb)
+            hb.pack_start(b, True, True, 0)
+        vbox.pack_end(hb, False, False, 0)
+
+        # make sure the sensor is actually running
+        sensor_set(DELAY, 200)
+        sensor_set(ENABLE, 1)
+
+        GLib.timeout_add(INTERVAL_MS, self.tick)
+        self.show_all()
+
+    # ------------------------------------------------------------------ util
+    def on_key(self, _w, ev):
+        if ev.keyval in (Gtk.accelerator_parse("Escape")[1], ord("q")):
+            Gtk.main_quit()
+        return False
+
+    def set_delay(self, ms):
+        sensor_set(DELAY, ms)
+        sensor_set(ENABLE, 1)
+
+    # ------------------------------------------------------------------ loop
+    def tick(self):
+        v = read_raw()
+        if v is not None:
+            self.x, self.y, self.z = v
+            self.samples += 1
+            self.update_labels()
+            self.level.queue_draw()
+            self.bars.queue_draw()
+        return True
+
+    def update_labels(self):
+        x, y, z = self.x, self.y, self.z
+        self.xyz.set_markup(
+            "<tt>X %+7d  (%+.2f g)\nY %+7d  (%+.2f g)\nZ %+7d  (%+.2f g)</tt>"
+            % (x, x / SCALE, y, y / SCALE, z, z / SCALE))
+
+        # which axis carries the most gravity tells you the physical pose
+        ax, ay, az = abs(x), abs(y), abs(z)
+        if az >= max(ax, ay):
+            pose = "flat, screen %s" % ("DOWN" if z < 0 else "UP")
+        elif ay >= max(ax, az):
+            pose = "upright, %s edge down" % ("TOP" if y < 0 else "BOTTOM")
+        else:
+            pose = "upright, %s edge down" % ("LEFT" if x < 0 else "RIGHT")
+        mag = math.sqrt(x * x + y * y + z * z)
+        self.info.set_markup(
+            "<small>|a| = %.0f  (%.2f g)   samples %d\n<b>%s</b></small>"
+            % (mag, mag / SCALE, self.samples, pose))
+
+    # ------------------------------------------------------------- drawings
+    def draw_level(self, w, cr):
+        a = w.get_allocation()
+        cx, cy = a.width / 2.0, a.height / 2.0
+        r = min(cx, cy) - 12
+
+        # background
+        cr.set_source_rgb(0.10, 0.10, 0.12)
+        cr.rectangle(0, 0, a.width, a.height)
+        cr.fill()
+
+        # rings + crosshair
+        cr.set_line_width(1)
+        cr.set_source_rgb(0.35, 0.35, 0.40)
+        for frac in (1.0, 0.66, 0.33):
+            cr.arc(cx, cy, r * frac, 0, 2 * math.pi)
+            cr.stroke()
+        cr.move_to(cx - r, cy)
+        cr.line_to(cx + r, cy)
+        cr.move_to(cx, cy - r)
+        cr.line_to(cx, cy + r)
+        cr.stroke()
+
+        # axis labels
+        cr.set_source_rgb(0.9, 0.4, 0.4)
+        cr.move_to(cx + r + 2, cy + 4)
+        cr.show_text("X")
+        cr.set_source_rgb(0.4, 0.9, 0.4)
+        cr.move_to(cx - 4, cy - r - 2)
+        cr.show_text("Y")
+        cr.set_source_rgb(0.5, 0.6, 1.0)
+        cr.move_to(cx - r - 10, cy + 4)
+        cr.show_text("Z")
+
+        # bubble: gravity projected on the screen plane.
+        # screen right = +X, screen up = -Y (Y increases downward on the panel)
+        gx = max(-1.0, min(1.0, self.x / SCALE))
+        gy = max(-1.0, min(1.0, self.y / SCALE))
+        bx = cx + gx * r
+        by = cy + gy * r
+
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.25)
+        cr.arc(bx, by, 10, 0, 2 * math.pi)
+        cr.fill_preserve()
+        cr.set_source_rgb(1.0, 0.85, 0.2)
+        cr.set_line_width(2)
+        cr.stroke()
+
+        cr.set_source_rgb(1.0, 0.85, 0.2)
+        cr.arc(bx, by, 3.5, 0, 2 * math.pi)
+        cr.fill()
+
+    def draw_bars(self, w, cr):
+        a = w.get_allocation()
+        cr.set_source_rgb(0.10, 0.10, 0.12)
+        cr.rectangle(0, 0, a.width, a.height)
+        cr.fill()
+
+        mid = a.width / 2.0
+        cr.set_line_width(1)
+        cr.set_source_rgb(0.35, 0.35, 0.40)
+        cr.move_to(mid, 0)
+        cr.line_to(mid, a.height)
+        cr.stroke()
+
+        rows = ((self.x, (0.90, 0.35, 0.35)), (self.y, (0.35, 0.90, 0.35)),
+                (self.z, (0.45, 0.60, 1.00)))
+        h = a.height / 3.0
+        for i, (val, col) in enumerate(rows):
+            frac = max(-1.0, min(1.0, val / SCALE))
+            y = i * h + 2
+            cr.set_source_rgb(0.20, 0.20, 0.24)
+            cr.rectangle(mid - 1, y, 0, h - 4)
+            cr.set_source_rgb(*col)
+            wdt = frac * (a.width / 2.0 - 4)
+            if wdt >= 0:
+                cr.rectangle(mid, y, wdt, h - 4)
+            else:
+                cr.rectangle(mid + wdt, y, -wdt, h - 4)
+            cr.fill()
+
+
+def main():
+    if not os.path.exists(RAW):
+        sys.stderr.write("no %s - is CONFIG_SENSORS_K2HH built and probed?\n" % RAW)
+        return 1
+    win = AccelWindow()
+    win.set_position(Gtk.WindowPosition.CENTER)
+    win.present()
+    Gtk.main()
+    return 0
+
+
+sys.exit(main())
