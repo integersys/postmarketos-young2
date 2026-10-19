@@ -1,0 +1,422 @@
+#!/bin/sh
+# start-young2-gui — orchestrates the proven Young2 Xfce GUI stack.
+#
+# Stages = the documented, individually-proven sequence (see
+# documentation/2026-09-23_19-31_automatic-xfce-boot/BOOT_SEQUENCE.md):
+#   translator -> Xorg+handover+320x480 -> blanking off -> env+shim ->
+#   dbus-run-session startxfce4 -> matchbox keyboard (placed).
+#
+# Modes:
+#   start   bring the stack up (idempotent; safe to run twice)
+#   stop    stop ONLY this stack's processes (keyboard->xfce->Xorg->translator)
+#   status  print per-stage state (also usable by rc-service status)
+#
+# Safety properties: condition-based waits with bounded timeouts, no block
+# device access, never reboots, never touches SSH/RNDIS configuration; on any
+# failure exits non-zero WITHOUT killing sshd.
+
+PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+SHIM=/usr/local/lib/young2-faccessat-shim.so
+XHELPER=/usr/local/bin/start-x-with-handover
+TRANSLATOR=/usr/local/bin/ts-xlate.py
+KEYBOARD_XML=/usr/share/matchbox-keyboard/keyboard.xml
+LOGDIR=/var/log
+LOG=$LOGDIR/young2-gui.log
+MAXLOG=20000
+RUN=/run/young2-gui
+PIDF=$RUN/session.pid     # pid of the dbus-run-session -> xfce4-session tree leader
+XPIDF=$RUN/xorg.pid
+TRPIDF=$RUN/ts-xlate.pid
+KBPIDF=$RUN/keyboard.pid
+BPIDF=$RUN/bounds.pid
+STAGEF=$RUN/stage         # last completed stage
+
+DISPLAY=:0
+XDG_RUNTIME_DIR=/tmp/runtime-root
+
+# ---------------------------------------------------------------- helpers ---
+log() {
+    # timestamped, single-line
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG" 2>/dev/null
+}
+
+truncate_log() {
+    # bounded log: keep the tail if the file grew too large (logrotate-free)
+    if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt "$MAXLOG" ]; then
+        tail -c $((MAXLOG / 2)) "$LOG" > "$LOG.new" 2>/dev/null &&
+            mv "$LOG.new" "$LOG"
+    fi
+}
+
+comm_of_pids() {
+    # print "pid comm" for every process, via /proc (busybox ps is unreliable).
+    # comm is truncated to 15 chars (TASK_COMM_LEN) — e.g. matchbox-keyboard
+    # shows as "matchbox-keyboa"; match with a prefix, not an exact string.
+    for p in /proc/[0-9]*; do
+        c=$(cat "$p/comm" 2>/dev/null) || continue
+        echo "${p#/proc/} $c"
+    done
+}
+
+pids_by_comm() {
+    # pids_by_comm <comm-prefix>  -> space-separated pids (may be empty)
+    # NOTE: comm is truncated to 15 chars (TASK_COMM_LEN), so the WANTED name
+    # may be LONGER than comm (matchbox-keyboard -> "matchbox-keyboa").
+    # Match when comm is a prefix of the wanted name, not vice versa.
+    # Empty comm lines (kernel threads / racing exits) must never match.
+    comm_of_pids | awk -v c="$1" '$2 != "" && index(c, $2) == 1 { printf "%s ", $1 }'
+}
+
+wait_for_file() {
+    # wait_for_file <path> <timeout-s>
+    i=0
+    while [ "$i" -lt "$2" ]; do
+        [ -e "$1" ] && return 0
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+wait_for_comm() {
+    # wait_for_comm <exact-comm> <timeout-s>
+    i=0
+    while [ "$i" -lt "$2" ]; do
+        [ -n "$(pids_by_comm "$1")" ] && return 0
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+xready() {
+    # X :0 answers a real request? (xprop is installed; xdpyinfo is NOT on this image)
+    DISPLAY=$DISPLAY timeout 5 xprop -root WM_CHECK >/dev/null 2>&1 || \
+        DISPLAY=$DISPLAY timeout 5 xprop -root >/dev/null 2>&1
+}
+
+wait_for_x() {
+    i=0
+    while [ "$i" -lt "$1" ]; do
+        xready && return 0
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+set_stage() { echo "$1" > "$STAGEF" 2>/dev/null; }
+
+bounds_running() {
+    # the window-bounds helper is a python3 process (comm=python3); identify it
+    # by cmdline, like the translator
+    for p in $(pids_by_comm python3); do
+        tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | \
+            grep -q young2-window-bounds && return 0
+    done
+    return 1
+}
+
+# ------------------------------------------------------------------ stop ----
+
+stop_stack() {
+    mkdir -p "$RUN" 2>/dev/null || RUN=/tmp/young2-gui
+    echo "Stopping young2 GUI stack..."
+    # Order: keyboard -> Xfce session (ICE teardown takes panel/desktop/xfwm4/
+    # xfsettingsd/xfconfd with it) -> Xorg -> translator.
+    # Exact-comm matching only; never pkill -f (would match this script/SSH).
+
+    for c in matchbox-keyboard xfce4-terminal xfce4-appfinder thunar; do
+        for p in $(pids_by_comm "$c"); do kill "$p" 2>/dev/null; done
+    done
+    sleep 1
+
+    for c in xfce4-session; do
+        for p in $(pids_by_comm "$c"); do kill "$p" 2>/dev/null; done
+    done
+    sleep 3
+    # force-kill any leftovers of the session family
+    for c in xfce4-session xfwm4 xfce4-panel xfdesktop xfsettingsd xfconfd \
+             xfce4-appfinder; do
+        for p in $(pids_by_comm "$c"); do kill -9 "$p" 2>/dev/null; done
+    done
+    # window-bounds helper (holds an X connection; stop before Xorg)
+    for p in $(pids_by_comm python3); do
+        if tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | \
+           grep -q young2-window-bounds; then
+            kill "$p" 2>/dev/null
+        fi
+    done
+    # session dbus (dbus-run-session spawned)
+    for p in $(pids_by_comm dbus-daemon); do
+        # only kill session-bus daemons on our runtime dir (env check), not system dbus
+        if tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | \
+           grep -q "^XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"; then
+            kill "$p" 2>/dev/null
+        fi
+    done
+    sleep 1
+
+    for c in Xorg; do
+        for p in $(pids_by_comm "$c"); do kill "$p" 2>/dev/null; done
+    done
+    sleep 2
+    for p in $(pids_by_comm Xorg); do kill -9 "$p" 2>/dev/null; done
+
+    for c in python3; do
+        # translator is the python3 running ts-xlate.py; check cmdline, not comm
+        for p in $c; do :; done
+        for p in $(pids_by_comm python3); do
+            if tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q ts-xlate; then
+                kill "$p" 2>/dev/null
+            fi
+        done
+    done
+    sleep 1
+
+    rm -f "$PIDF" "$XPIDF" "$TRPIDF" "$KBPIDF" "$BPIDF"
+    echo stopped > "$STAGEF" 2>/dev/null
+    log "STOP complete"
+    echo "Stopped. SSH/RNDIS/framebuffer/input untouched."
+    return 0
+}
+
+# ----------------------------------------------------------------- status ---
+
+status_stack() {
+    rc=0
+    [ -d "$(dirname "$STAGEF")" ] || mkdir -p "$(dirname "$STAGEF")" 2>/dev/null
+    t=$(pids_by_comm python3 | tr ' ' '\n' | while read p; do
+            [ -n "$p" ] && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | \
+                grep -q ts-xlate && echo "$p"
+        done)
+    x=$(pids_by_comm Xorg)
+    s=$(pids_by_comm xfce4-session)
+    w=$(pids_by_comm xfwm4)
+    p=$(pids_by_comm xfce4-panel)
+    d=$(pids_by_comm xfdesktop)
+    k=$(pids_by_comm matchbox-keyboard)
+    if bounds_running; then b=UP; else b=DOWN; rc=1; fi
+    [ -n "$t" ] || rc=1; [ -n "$x" ] || rc=1; [ -n "$s" ] || rc=1
+    echo "translator:      ${t:-DOWN}"
+    echo "Xorg:            ${x:-DOWN}"
+    if xready; then echo "X display :0:    UP"; else echo "X display :0:    DOWN"; rc=1; fi
+    echo "xfce4-session:   ${s:-DOWN}"
+    echo "xfwm4:           ${w:-DOWN}"
+    echo "xfce4-panel:     ${p:-DOWN}"
+    echo "xfdesktop:       ${d:-DOWN}"
+    echo "keyboard:        ${k:-DOWN}"
+    echo "window-bounds:   $b"
+    [ -e /dev/input/touchscreen-xlate ] && echo "touch-xlate dev: present" \
+        || { echo "touch-xlate dev: MISSING"; rc=1; }
+    echo "last stage:      $(cat "$STAGEF" 2>/dev/null || echo unknown)"
+    echo "shim:            $( [ -f $SHIM ] && echo present || echo MISSING )"
+    return $rc
+}
+
+# ------------------------------------------------------------------ start ---
+
+start_stack() {
+    mkdir -p "$RUN" 2>/dev/null || RUN=/tmp/young2-gui
+    truncate_log
+    log "===== start-young2-gui invoked (pid $$) ====="
+    set_stage starting
+
+    # ---- duplicate protection -------------------------------------------
+    s=$(pids_by_comm xfce4-session)
+    if [ -n "$s" ]; then
+        # Xfce up but helper dead (e.g. crashed later)? start just the helper.
+        if ! bounds_running; then
+            log "xfce4-session running; starting missing window-bounds helper"
+            nohup setsid python3 -u /usr/local/bin/young2-window-bounds \
+                >> "$LOG" 2>&1 < /dev/null &
+            echo $! > "$BPIDF" 2>/dev/null
+            sleep 2
+            bounds_running && log "window-bounds helper started (late)" || \
+                log "note: window-bounds helper failed to start (late)"
+        fi
+        log "START skipped: xfce4-session already running (pids: $s)"
+        set_stage complete
+        echo "GUI already running (xfce4-session pid $s). Nothing to do."
+        status_stack
+        return 0
+    fi
+
+    # ---- stage A: prerequisites -----------------------------------------
+    # NOTE: 90 s, not 10 s — at boot `local` may still be finishing when we
+    # are invoked; fb0/input nodes appear near the end of its script run.
+    for f in /dev/fb0 /dev/input/touchscreen /dev/uinput /dev/tty1; do
+        if wait_for_file "$f" 90; then
+            log "prereq OK: $f"
+        else
+            log "FAIL prerequisite missing after timeout: $f"
+            echo "Prerequisite missing: $f (GUI not started; system/SSH unaffected)" >&2
+            exit 3
+        fi
+    done
+    # RGB bitfields correctness (applied by 98-rgb-bitfields.start at boot)
+    rgb=$(python3 /usr/local/bin/fbvar.py get 2>/dev/null | awk '/RED/{r=$3} /GREEN/{g=$3} /BLUE/{b=$3} END{print r","g","b}')
+    log "rgb bitfields: $rgb (expect 0,8,16)"
+
+    # ---- stage B: touchscreen translator --------------------------------
+    set_stage translator
+    if [ -e /dev/input/touchscreen-xlate ] && wait_for_comm python3 0; then
+        :
+    fi
+    tr_already=""
+    for p in $(pids_by_comm python3); do
+        if tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q ts-xlate; then
+            tr_already="$p"
+        fi
+    done
+    if [ -n "$tr_already" ]; then
+        log "translator already running (pid $tr_already)"
+    else
+        log "starting translator"
+        setsid python3 -u "$TRANSLATOR" > /tmp/ts-xlate.log 2>&1 < /dev/null &
+        echo $! > "$TRPIDF" 2>/dev/null
+    fi
+    if ! wait_for_file /dev/input/touchscreen-xlate 20; then
+        log "FAIL: /dev/input/touchscreen-xlate not created (timeout 20s)"
+        echo "Translator failed to create /dev/input/touchscreen-xlate" >&2
+        exit 4
+    fi
+    log "touchscreen-xlate ready"
+
+    # ---- stage C: Xorg + handover + 320x480 ------------------------------
+    set_stage xorg
+    if [ -n "$(pids_by_comm Xorg)" ]; then
+        log "Xorg already running; reusing"
+    else
+        log "starting Xorg via $XHELPER"
+        "$XHELPER" >> "$LOG" 2>&1
+        rc=$?
+        log "helper exit: $rc"
+        [ "$rc" -eq 0 ] || { echo "start-x-with-handover failed (rc=$rc)" >&2; exit 5; }
+    fi
+    if ! wait_for_x 30; then
+        log "FAIL: X :0 not answering after 30s"
+        echo "X server did not come up" >&2
+        exit 6
+    fi
+    for p in $(pids_by_comm Xorg); do echo "$p" > "$XPIDF"; break; done
+    # logical geometry check (helper's xrandr should already have set 320x480)
+    cur=$(DISPLAY=$DISPLAY xrandr 2>/dev/null | sed -n 's/^Screen 0:.*current \([0-9]* x [0-9]*\).*/\1/p')
+    log "X current geometry: $cur (expect 320 x 480)"
+    if [ "$cur" != "320 x 480" ]; then
+        # the CURRENT proven method to force it, then re-pan (mode set resets DISPC)
+        DISPLAY=$DISPLAY xrandr --output default --mode 320x480 >> "$LOG" 2>&1
+        echo 0,0 > /sys/class/graphics/fb0/pan 2>/dev/null
+        cur=$(DISPLAY=$DISPLAY xrandr 2>/dev/null | sed -n 's/^Screen 0:.*current \([0-9]* x [0-9]*\).*/\1/p')
+        log "after correction: $cur"
+        [ "$cur" = "320 x 480" ] || { echo "X geometry is $cur, not 320x480" >&2; exit 7; }
+    fi
+    log "scanout nudge pan written (harmless if page already correct)"
+
+    # ---- stage D: blanking off -------------------------------------------
+    set_stage dpms
+    DISPLAY=$DISPLAY xset -dpms 2>>"$LOG"
+    DISPLAY=$DISPLAY xset s off 2>>"$LOG"
+    DISPLAY=$DISPLAY xset s noblank 2>>"$LOG" || log "xset s noblank unsupported (ok)"
+    log "blanking disabled: $(DISPLAY=$DISPLAY xset q 2>/dev/null | grep -E 'DPMS is' | head -1)"
+
+    # ---- stage E: environment --------------------------------------------
+    set_stage env
+    mkdir -p "$XDG_RUNTIME_DIR"
+    chmod 700 "$XDG_RUNTIME_DIR"
+    [ -f "$SHIM" ] || { echo "shim missing: $SHIM" >&2; exit 8; }
+    export DISPLAY XDG_RUNTIME_DIR
+    export LD_PRELOAD="$SHIM"
+    log "environment: DISPLAY=$DISPLAY XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR LD_PRELOAD=$SHIM"
+
+    # ---- stage E2: window-bounds helper -----------------------------------
+    # Must be watching BEFORE Xfce maps its windows so map-time clamping works.
+    # Plain Xlib client; does not need the shim.
+    set_stage bounds
+    if bounds_running; then
+        log "window-bounds already running"
+    else
+        nohup setsid python3 -u /usr/local/bin/young2-window-bounds \
+            >> "$LOG" 2>&1 < /dev/null &
+        echo $! > "$BPIDF" 2>/dev/null
+        log "window-bounds helper started (pid $(cat "$BPIDF" 2>/dev/null))"
+    fi
+    i=0
+    while [ "$i" -lt 10 ]; do
+        bounds_running && break
+        sleep 1
+        i=$((i + 1))
+    done
+    if bounds_running; then
+        log "window-bounds helper confirmed"
+    else
+        log "note: window-bounds helper not confirmed (non-fatal; windows may overflow)"
+    fi
+
+    # ---- stage F: Xfce ----------------------------------------------------
+    set_stage xfce
+    nohup dbus-run-session -- startxfce4 >> "$LOG" 2>&1 < /dev/null &
+    dbuspid=$!
+    echo "$dbuspid" > "$PIDF" 2>/dev/null
+    log "dbus-run-session started (pid $dbuspid); waiting for xfce components"
+    ok=1
+    for c in xfce4-session xfwm4 xfce4-panel xfsettingsd; do
+        if wait_for_comm "$c" 60; then
+            log "component up: $c"
+        else
+            log "FAIL: $c did not appear within 60s"
+            ok=0
+        fi
+    done
+    [ "$ok" -eq 1 ] || { echo "Xfce session incomplete (see $LOG)" >&2; exit 9; }
+    # xfdesktop is slightly slower sometimes; wait but do not fail the boot on it
+    wait_for_comm xfdesktop 15 || log "note: xfdesktop not seen yet"
+
+    # ---- stage G: on-screen keyboard --------------------------------------
+    set_stage keyboard
+    if [ -n "$(pids_by_comm matchbox-keyboard)" ]; then
+        log "keyboard already running"
+    else
+        setsid matchbox-keyboard --xid > /tmp/mbk-xid.log 2>&1 < /dev/null &
+        echo $! > "$KBPIDF" 2>/dev/null
+        xid=""
+        i=0
+        while [ "$i" -lt 15 ]; do
+            xid=$(head -1 /tmp/mbk-xid.log 2>/dev/null | tr -d '[:space:]')
+            [ -n "$xid" ] && break
+            sleep 1
+            i=$((i + 1))
+        done
+        if [ -n "$xid" ]; then
+            python3 /usr/local/bin/young2-keyboard-place "$xid" >> "$LOG" 2>&1 \
+                && log "keyboard placed (xid $xid)" \
+                || log "note: keyboard placement helper failed (xid $xid)"
+        else
+            log "note: keyboard did not print an xid within 15s"
+        fi
+    fi
+    if ! wait_for_comm matchbox-keyboard 2; then
+        log "note: keyboard not running (non-fatal)"
+    fi
+
+    set_stage complete
+    log "START complete"
+    echo "Young2 GUI started. Log: $LOG"
+    status_stack
+    return 0
+}
+
+# ------------------------------------------------------------------- main ---
+
+case "${1:-start}" in
+    start)  start_stack ;;
+    stop)   stop_stack ;;
+    restart) stop_stack; sleep 2; start_stack ;;
+    status) status_stack ;;
+    *)
+        echo "usage: $0 {start|stop|restart|status}" >&2
+        exit 2
+        ;;
+esac

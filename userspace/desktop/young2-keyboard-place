@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""young2-keyboard-place <xid> — map/position/raise the matchbox keyboard window.
+
+Extracted from the ad-hoc snippet used in the previous tasks (proven there):
+XMoveResizeWindow(0,360,320,120) + XRaiseWindow + XMapWindow on DISPLAY :0.
+"""
+import ctypes
+import sys
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("usage: young2-keyboard-place <xid>", file=sys.stderr)
+        return 2
+    w = int(sys.argv[1], 0)
+    x11 = ctypes.CDLL("libX11.so.6")
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    d = x11.XOpenDisplay(b":0")
+    if not d:
+        print("cannot open display :0", file=sys.stderr)
+        return 1
+    handler = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)
+    x11.XSetErrorHandler(handler(lambda a, b: None))
+    x11.XMoveResizeWindow(d, w, 0, 360, 320, 120)
+    x11.XRaiseWindow(d, w)
+    x11.XMapWindow(d, w)
+    x11.XSync(d, False)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())

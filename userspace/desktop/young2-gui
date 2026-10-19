@@ -1,0 +1,35 @@
+#!/sbin/openrc-run
+
+name="young2-gui"
+description="Samsung Young2 automatic Xfce desktop stack (ts-xlate, Xorg 320x480, Xfce, keyboard)"
+
+LAUNCHER=/usr/local/bin/start-young2-gui
+
+depend() {
+    # Prerequisites run inside `local` (/etc/local.d/*.start: input nodes,
+    # fb0 node, RGB bitfield fix) and udev settle.  Nothing may depend on us:
+    # if the GUI fails, boot and SSH must still complete normally.
+    #
+    # NOTE: `local` itself declares `after *`, so a soft `after local` here
+    # forms a cycle that OpenRC resolves by DROPPING it (observed 2026-09-23:
+    # young2-gui started before local -> /dev/fb0 missing -> boot-time GUI
+    # failure).  `need` is a hard dependency and wins over the soft edge.
+    need local
+    after udev-settle
+}
+
+start() {
+    ebegin "Starting Young2 GUI stack (translator, Xorg, Xfce)"
+    "$LAUNCHER" start
+    eend $? "Young2 GUI failed to start (SSH/RNDIS unaffected)"
+}
+
+stop() {
+    ebegin "Stopping Young2 GUI stack"
+    "$LAUNCHER" stop
+    eend $?
+}
+
+status() {
+    "$LAUNCHER" status
+}

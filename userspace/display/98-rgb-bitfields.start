@@ -1,0 +1,136 @@
+#!/bin/sh
+# 98-rgb-bitfields.start
+#
+# Make the physically-correct framebuffer RGB bitfields active on every normal boot.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS IS NEEDED
+# ---------------------------------------------------------------------------
+# The running kernel (2016 vendor/downstream 3.10.17-young2) reports
+# fb_var_screeninfo colour bitfields that describe the byte layout [x][B][G][R]:
+#
+#       red.offset   = 24   red.length   = 8
+#       green.offset = 16   green.length = 8
+#       blue.offset  =  8   blue.length  = 8
+#
+# The panel's PHYSICAL byte layout is proven to be  R G B 00  (RGBX8888), because
+# drivers/video/sprdfb/sprdfb_dispc.c programs DISPC_OSD_CTRL from bits_per_pixel
+# with data format 3 PLUS the `rb switch` bit (1 << 15), which swaps R and B
+# relative to the metadata.
+#
+# Only userspace reads the metadata, so the wrong values silently mislead Xorg,
+# the fbdev driver and fbset. Observed effect BEFORE this fix:
+#       X red -> BLACK     X green -> BLUE     X blue -> RED
+# (white and black happened to be correct because all their bytes are equal).
+#
+# Correcting the metadata to R0/G8/B16 makes userspace agree with the hardware.
+# This is a METADATA-ONLY change: the DISPC never reads these bitfields, so
+# scanout is unaffected.
+#
+# ---------------------------------------------------------------------------
+# WHERE THIS RUNS
+# ---------------------------------------------------------------------------
+# /etc/local.d runs its *.start files in lexical order during the `default`
+# runlevel, after the boot runlevel, so /proc, /sys, /dev and the rootfs are up.
+#
+# This file sorts immediately AFTER 98-fb0-node.start (which creates /dev/fb0)
+# and BEFORE 99-ssh-pty-rndis.start:
+#
+#       97-input-nodes.start
+#       98-fb0-node.start        <- creates /dev/fb0 and does the logo handover
+#       98-rgb-bitfields.start   <- THIS FILE   ('f' < 'r', so it sorts second)
+#       99-ssh-pty-rndis.start
+#       usb-rndis-debug.start
+#       zz-rndis-internet.start
+#
+# THE ORDERING IS LOAD-BEARING: the correction needs a usable /dev/fb0, so it
+# must not run before 98-fb0-node.start. It is kept in a SEPARATE file from
+# 98-fb0-node.start so that either can be reverted independently.
+#
+# ---------------------------------------------------------------------------
+# WHAT IT CHANGES
+# ---------------------------------------------------------------------------
+#       red.offset   = 0    red.length   = 8
+#       green.offset = 8    green.length = 8
+#       blue.offset  = 16   blue.length  = 8
+#       transp.length = 0
+#
+# Everything else is preserved, because fbvar.py starts from the structure the
+# kernel returns via FBIOGET_VSCREENINFO and rewrites ONLY the colour bitfields:
+# xres, yres, xres_virtual, yres_virtual, xoffset, yoffset, bits_per_pixel,
+# grayscale, nonstd, activate, height, width, accel_flags, pixclock and all the
+# timing/margin/sync/vmode/colorspace fields are carried through unchanged.
+# fbvar.py also reports any OTHER field the kernel changed, so a surprise would
+# be visible in the log.
+#
+# transp.offset is set to 0. That is already the kernel's default on a fresh boot
+# and it is NOT load-bearing while transp.length is 0 (both 0 and 24 have been
+# measured to work). No claim is made that any particular transp.offset is
+# physically required.
+#
+# ---------------------------------------------------------------------------
+# PROPERTIES
+# ---------------------------------------------------------------------------
+#   IDEMPOTENT        applying the same values again is a no-op.
+#   NEVER FAILS BOOT  every path exits 0. A failure leaves the system exactly
+#                     as found (wrong colours) rather than breaking the boot.
+#   NO NETWORK        nothing is downloaded.
+#   NO XORG           independent of any display server.
+#   NO NEW DEPS       uses the already-installed /usr/bin/python3 (3.14.5) and
+#                     only its stdlib (fcntl, struct).
+#
+# ---------------------------------------------------------------------------
+# REVERT
+# ---------------------------------------------------------------------------
+#   rm /etc/local.d/98-rgb-bitfields.start
+#   rm /usr/local/bin/fbvar.py
+#   # (optional) restore the kernel default in the running session:
+#   #   python3 /tmp/fbvar.py setbits 24 8 16 8 8 8 0 0
+#
+# ---------------------------------------------------------------------------
+# EVIDENCE
+# ---------------------------------------------------------------------------
+#   documentation/2026-09-18_23-27_persistent-framebuffer-rgb-metadata/
+#   documentation/2026-09-18_08-13_framebuffer-color-metadata/   (proven runtime fix)
+#   framebuffer.txt  -> section "PERSISTENT RGB BITFIELD CORRECTION"
+
+FB=/dev/fb0
+HELPER=/usr/local/bin/fbvar.py
+LOG=/var/log/fb-rgb-bitfields.log
+PY=/usr/bin/python3
+
+# Fresh log each boot, tagged with the boot id so it can be matched to a session.
+{
+	echo "=== fb-rgb-bitfields $(date -u '+%Y-%m-%dT%H:%M:%SZ') boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) ==="
+} > "$LOG" 2>/dev/null
+
+# /dev/fb0 must already exist (created by 98-fb0-node.start). If it does not,
+# do nothing at all and leave the system as found.
+if [ ! -c "$FB" ]; then
+	echo "SKIP: $FB is not a character device - leaving metadata untouched" >> "$LOG" 2>/dev/null
+	exit 0
+fi
+
+if [ ! -x "$PY" ]; then
+	echo "SKIP: $PY is not executable" >> "$LOG" 2>/dev/null
+	exit 0
+fi
+
+if [ ! -r "$HELPER" ]; then
+	echo "SKIP: $HELPER not readable" >> "$LOG" 2>/dev/null
+	exit 0
+fi
+
+# Apply. fbvar.py prints BEFORE, the ioctl result, AFTER, and whether the kernel
+# accepted and persisted the values; it also lists any other field that changed.
+"$PY" "$HELPER" setbits 0 8 8 8 16 8 0 0 >> "$LOG" 2>&1
+echo "helper exit=$?" >> "$LOG" 2>/dev/null
+
+# Read back once more, independently, so the log always ends with the state the
+# kernel is actually reporting after this script has run.
+{
+	echo "--- independent readback after apply ---"
+	"$PY" "$HELPER" get 2>&1 | grep -E "RED  \(|GREEN\(|BLUE \(|TRANSP\(|fbset rgba"
+} >> "$LOG" 2>&1
+
+exit 0

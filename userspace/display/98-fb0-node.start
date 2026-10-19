@@ -1,0 +1,73 @@
+#!/bin/sh
+# 98-fb0-node.start
+#
+# Make the sprdfb framebuffer available to userspace at boot.
+#
+# WHY THIS IS NEEDED
+#   The running kernel is the 2016 vendor/downstream build with
+#   CONFIG_DEVTMPFS unset, so the kernel cannot create /dev nodes.
+#   eudev is installed and enabled but its init script refuses to run:
+#       /etc/init.d/udev start_pre():
+#           if ! grep -qs devtmpfs /proc/filesystems; then
+#               eerror "CONFIG_DEVTMPFS=y is required in your kernel configuration"
+#               ...
+#               mount -n -t tmpfs dev /dev
+#   That fallback is why /dev is a plain tmpfs. Every node must therefore be
+#   created by hand. The original script that did this for the framebuffer was
+#   /etc/local.d/y2dev.off, which is DISABLED (".off", not ".start"), because the
+#   device was reconfigured to a headless/console setup on 2026-08-10 when the
+#   Xfce/Xorg/fbkeyboard stack was purged.
+#
+#   Result: /sys/class/graphics/fb0 existed, /dev/fb0 did not.
+#
+# REVERT
+#   rm /etc/local.d/98-fb0-node.start
+#
+# EVIDENCE / FULL ANALYSIS
+#   documentation/2026-09-17_07-02_sprdfb-missing-dev-fb0/
+#   documentation/2026-09-17_07-30_y2dev-disabled-and-restore-fb0-at-boot/
+
+FB=/sys/class/graphics/fb0
+
+# ---- 1. create /dev/fb0 from the major:minor the KERNEL reports -------------
+# Never hardcode 29:0; read it from sysfs so this stays correct if it changes.
+if [ -r "$FB/dev" ]; then
+	DEVDATA=$(cat "$FB/dev" 2>/dev/null)	# e.g. "29:0"
+	MAJ=${DEVDATA%%:*}
+	MIN=${DEVDATA##*:}
+	if [ -n "$MAJ" ] && [ -n "$MIN" ] && [ ! -e /dev/fb0 ]; then
+		mknod /dev/fb0 c "$MAJ" "$MIN" 2>/dev/null
+	fi
+	[ -e /dev/fb0 ] && chmod 666 /dev/fb0 2>/dev/null
+	mkdir -p /dev/graphics 2>/dev/null
+	[ -e /dev/graphics/fb0 ] || ln -sf /dev/fb0 /dev/graphics/fb0 2>/dev/null
+fi
+
+# ---- 2. hand the display over to the framebuffer ----------------------------
+# At boot the display controller scans out a retained boot-logo buffer, so the
+# panel shows the Samsung splash no matter what Linux does.
+#
+# The handover needs BOTH of the following:
+#   blank=0  -> sprdfb_unblank + sprdfb_dispc_resume (resumes the controller)
+#   pan      -> reaches sprdfb_pan_display() -> dev->ctrl->refresh() -> the
+#               refresh tail frees the retained logo buffer.
+#
+# CRITICAL: the driver silently ignores the FIRST pan call after every boot.
+#   sprdfb_main.c:
+#       #define SPRDFB_FRAMES_TO_SKIP (1)
+#       static int frame_count;                 /* zero at boot */
+#       sprdfb_pan_display():
+#           if (frame_count < SPRDFB_FRAMES_TO_SKIP) {
+#               frame_count++;
+#               return 0;                        /* no refresh, no handover */
+#           }
+#   So the pan write must be issued MORE THAN ONCE. A single write leaves the
+#   Samsung logo on screen even though /dev/fb0 now exists.
+#
+# Final offset is left at 0,0 (page 0 visible) so that a naive "write page 0"
+# works; content is still safest written to both pages (see framebuffer.txt).
+echo 0 > "$FB/blank" 2>/dev/null
+echo 0,480 > "$FB/pan" 2>/dev/null	# call 1 - swallowed by the frame-skip guard
+echo 0,0 > "$FB/pan" 2>/dev/null	# call 2 - real refresh, frees the logo buffer
+
+exit 0

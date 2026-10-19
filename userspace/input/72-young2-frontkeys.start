@@ -1,0 +1,52 @@
+#!/bin/sh
+# 72-young2-frontkeys.start
+#
+# Start the front-control policy + capacitive key backlight daemon.
+#
+# WHY
+#   The three front controls are on TWO devices and nothing in this userspace acted
+#   on them: Home is KEY_HOME(102) on the keypad matrix, Back is KEY_BACK(158) and
+#   Recent is keycode 254 on the ist30xx touchscreen. This daemon maps them to native
+#   XFCE/X11 actions (show-desktop / alt+Tab / alt+Left) and drives
+#   /sys/class/leds/keyboard-backlight.
+#
+# NUMBERING
+#   72- sits after 70-young2-accel.start and before 97-input-nodes.start, so it does
+#   not collide with anything. It needs /dev/input/event0+event1 and the X session;
+#   the daemon retries if a device is late.
+#
+# IDEMPOTENT: refuses to start a second copy.
+#
+# REVERT
+#   rm /etc/local.d/72-young2-frontkeys.start
+#   rm -f /usr/local/bin/young2-frontkeys.py /var/log/young2-frontkeys.log
+#   (then kill the daemon or reboot)
+#
+# EVIDENCE / FULL ANALYSIS
+#   drivers/input/documentation/2026-10-07_front-buttons/
+
+DAEMON=/usr/local/bin/young2-frontkeys.py
+[ -x "$DAEMON" ] || exit 0
+
+for p in /proc/[0-9]*; do
+	c=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)
+	case "$c" in
+		*young2-frontkeys.py*) exit 0 ;;
+	esac
+done
+
+# wait (bounded) for the input devices
+i=0
+while [ $i -lt 30 ] && [ ! -e /dev/input/event0 ]; do
+	sleep 1
+	i=$((i + 1))
+done
+[ -e /dev/input/event0 ] || exit 0
+
+# the LEDs must be dark at boot; the daemon will light them on first use
+[ -e /sys/class/leds/keyboard-backlight/brightness ] && \
+	echo 0 > /sys/class/leds/keyboard-backlight/brightness 2>/dev/null
+
+setsid python3 "$DAEMON" </dev/null >/dev/null 2>&1 &
+
+exit 0

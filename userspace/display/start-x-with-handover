@@ -1,0 +1,173 @@
+#!/bin/sh
+# start-x-with-handover
+#
+# Start Xorg on the Young 2 and make its output actually reach the physical LCD.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS IS NEEDED
+# ---------------------------------------------------------------------------
+# Xorg starts fine, the fbdev driver opens /dev/fb0, and X writes correct bytes
+# into framebuffer memory. But the panel keeps scanning a STALE buffer, so the
+# LCD shows a plain white screen instead of X's content.
+#
+# The reason, from dmesg at every X start:
+#
+#     sprdfb_powerdown
+#     dispc: [sprdfb_dispc_suspend], dev->enable = 1
+#     sprdfb: [sprdfb_panel_suspend], dev_id = 0
+#     sprdfb:[sprdfb_pan_display]: Invalid Device status 0     <- Xorg's own pan, rejected
+#     sprdfb: [sprdfb_unblank]
+#     dispc: [sprdfb_dispc_resume], dev->enable= 0
+#     dispc: [sprdfb_dispc_resume] from deep sleep
+#     dispc: sprdfb:[sprdfb_dispc_early_init]: resume
+#     sprdfb:[sprdfb_panel_resume],dev->enable=0, from_deep_sleep=1
+#     dispc: [sprdfb_dispc_resume], leave dev->enable= 1
+#
+# Xorg's VT acquisition / mode set suspends the panel. The driver's own unblank
+# resumes the controller, but the DISPC base address is only programmed by the
+# REFRESH path, which runs from sprdfb_pan_display(). So the controller is
+# enabled but still pointed at the old buffer.
+#
+# ONE pan write after that reprograms the base and the panel starts following
+# framebuffer memory. Measured by a controlled single-variable matrix:
+#
+#     unblank only          -> FAIL (panel still stale white)
+#     pan 0,480             -> WORK
+#     pan 0,0               -> WORK
+#     pan 0,480 ; pan 0,0   -> WORK
+#     pan 0,480 ; unblank   -> WORK
+#
+# => the pan is the essential action; it is sufficient on its own, the target
+#    offset is irrelevant, and the order relative to unblank does not matter.
+#
+# ---------------------------------------------------------------------------
+# WHAT IT DOES
+# ---------------------------------------------------------------------------
+#   1. starts Xorg with the proven config (only if it is not already running)
+#   2. waits for the CONDITION that makes the pan meaningful - the DISPC resume
+#      that ends Xorg's VT/mode set - instead of sleeping a fixed number of
+#      seconds
+#   3. issues one pan write (the handover)
+#
+# The unblank write is kept as a harmless, idempotent normalisation. It is NOT
+# the step that was failing (unblank alone was measured to be insufficient), and
+# it can be removed without breaking the handover.
+#
+# ---------------------------------------------------------------------------
+# USAGE
+# ---------------------------------------------------------------------------
+#   start-x-with-handover
+#       start Xorg and hand the panel over.  Then set whatever you want to show:
+#           DISPLAY=:0 xsetroot -solid red
+#
+#   start-x-with-handover          (run again while X is already up)
+#       just re-applies the handover - safe, and the fix if the panel ever
+#       shows the stale buffer again
+#
+# Stop Xorg with:
+#   kill -TERM $(pgrep -f '/usr/libexec/Xor[g]' | head -1)
+#   echo 0,0 > /sys/class/graphics/fb0/pan
+#
+# ---------------------------------------------------------------------------
+# REVERT
+# ---------------------------------------------------------------------------
+#   rm -f /usr/local/bin/start-x-with-handover
+#   rm -rf /etc/young2
+# See REVERT.md in the task folder.
+#
+# ---------------------------------------------------------------------------
+# EVIDENCE
+# ---------------------------------------------------------------------------
+#   documentation/2026-09-19_00-07_xorg-physical-scanout-handover/
+#
+# This script does NOT run at boot. Nothing was added to /etc/local.d, so a
+# normal boot behaves exactly as before.
+
+set -u
+
+FB=/sys/class/graphics/fb0      # sysfs attributes: blank, pan
+DEV=/dev/fb0                    # the character device node (29:0)
+CONF=/etc/young2/xorg-scanout.conf
+LOG=/tmp/xorg-scanout.log
+OUT=/tmp/xorg-scanout-stdout.log
+XRG='/usr/libexec/Xor[g]'      # bracket trick: never matches this script itself
+RESUME_MARK='leave dev->enable= 1'
+
+xpid() { pgrep -f "$XRG" 2>/dev/null | head -1; }
+
+# NOTE: test the DEVICE NODE, not the sysfs path. /sys/class/graphics/fb0 is a
+# symlink to a sysfs DIRECTORY, so `[ -c /sys/class/graphics/fb0 ]` is always
+# false - that mistake made an earlier version of this script refuse to run.
+if [ ! -c "$DEV" ]; then
+	echo "ERROR: $DEV is not a character device - is the framebuffer up?" >&2
+	exit 1
+fi
+if [ ! -e "$FB/pan" ]; then
+	echo "ERROR: $FB/pan missing - is sprdfb bound?" >&2
+	exit 1
+fi
+
+if [ -z "$(xpid)" ]; then
+	if [ ! -r "$CONF" ]; then
+		echo "ERROR: config $CONF missing" >&2
+		exit 1
+	fi
+
+	# Count the DISPC-resume marker BEFORE starting Xorg, so the wait below can
+	# detect a NEW one rather than one left over from an earlier run.
+	BEFORE=$(dmesg 2>/dev/null | grep -c "$RESUME_MARK")
+
+	Xorg :0 vt1 -noreset -config "$CONF" -logfile "$LOG" > "$OUT" 2>&1 &
+
+	# Wait (bounded) for Xorg to finish its VT acquisition and mode set. That is
+	# the moment the DISPC has been resumed and a pan can take effect. This is a
+	# real condition, not a fixed sleep.
+	#
+	# NOTE: do NOT test Xorg's liveness inside this loop. /usr/bin/Xorg is a shell
+	# wrapper that execs /usr/libexec/Xorg, so for a moment NEITHER is visible; an
+	# early liveness test aborts a perfectly good start. Liveness is checked once,
+	# after the wait.
+	i=0
+	while [ "$i" -lt 150 ]; do
+		NOW=$(dmesg 2>/dev/null | grep -c "$RESUME_MARK")
+		[ "$NOW" -gt "$BEFORE" ] && break
+		sleep 0.1
+		i=$((i + 1))
+	done
+
+	if [ -z "$(xpid)" ]; then
+		echo "ERROR: Xorg is not running - see $LOG" >&2
+		exit 1
+	fi
+	if [ "$i" -ge 150 ]; then
+		echo "note: DISPC resume marker not seen within 15s; panning anyway" >&2
+	fi
+else
+	echo "note: Xorg already running (pid $(xpid)); applying handover only"
+fi
+
+# ---- the scanout handover ---------------------------------------------------
+# One pan write is the essential action: it runs sprdfb_pan_display() ->
+# dev->ctrl->refresh(), which programs the DISPC base address at framebuffer
+# memory. The offset value itself does not matter.
+echo 0 > "$FB/blank" 2>/dev/null     # harmless normalisation (not the failing step)
+echo 0,0 > "$FB/pan" 2>/dev/null     # <-- the handover
+
+# ---- logical 320x480 desktop (ADDED 2026-09-20) -----------------------------
+# Xorg's fbdev driver can only expose the framebuffer's full virtual height
+# (320x960): sprdfb accepts NO other geometry (any other FBIOPUT_VSCREENINFO is
+# rejected with EINVAL), so "Virtual 320 480" makes Xorg fail to start with
+# "FBIOPUT_VSCREENINFO: Invalid argument".
+# Instead, switch the fbdev output to its built-in 320x480 mode AFTER Xorg is up,
+# so the X root window (and the WM desktop) matches the visible panel while the
+# kernel framebuffer stays 320x960 virtual. The mode set resets the DISPC, so the
+# handover pan must be re-issued afterwards.
+if command -v xrandr >/dev/null 2>&1; then
+	DISPLAY=:0 xrandr --output default --mode 320x480 >/dev/null 2>&1
+	echo 0,0 > "$FB/pan" 2>/dev/null
+fi
+
+echo "Xorg pid: $(xpid)"
+echo "fb pan : $(cat $FB/pan 2>/dev/null)"
+echo "Now set the root colour, e.g.:  DISPLAY=:0 xsetroot -solid red"
+exit 0

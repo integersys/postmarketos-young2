@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<keyboard>
+  <layout id="compact">
+    <row>
+      <key><default display="1" /><shifted display="!" /></key>
+      <key><default display="2" /><shifted display="@" /></key>
+      <key><default display="3" /><shifted display="#" /></key>
+      <key><default display="4" /><shifted display="$" /></key>
+      <key><default display="5" /><shifted display="%" /></key>
+      <key><default display="6" /><shifted display="^" /></key>
+      <key><default display="7" /><shifted display="&amp;" /></key>
+      <key><default display="8" /><shifted display="*" /></key>
+      <key><default display="9" /><shifted display="(" /></key>
+      <key><default display="0" /><shifted display=")" /></key>
+      <key width="1500"><default display="BkSp" action="backspace" /></key>
+    </row>
+    <row>
+      <key><default display="q" /><shifted display="Q" /></key>
+      <key><default display="w" /><shifted display="W" /></key>
+      <key><default display="e" /><shifted display="E" /></key>
+      <key><default display="r" /><shifted display="R" /></key>
+      <key><default display="t" /><shifted display="T" /></key>
+      <key><default display="y" /><shifted display="Y" /></key>
+      <key><default display="u" /><shifted display="U" /></key>
+      <key><default display="i" /><shifted display="I" /></key>
+      <key><default display="o" /><shifted display="O" /></key>
+      <key><default display="p" /><shifted display="P" /></key>
+      <key width="1200"><default display="Esc" keysym="Escape" /></key>
+    </row>
+    <row>
+      <key><default display="a" /><shifted display="A" /></key>
+      <key><default display="s" /><shifted display="S" /></key>
+      <key><default display="d" /><shifted display="D" /></key>
+      <key><default display="f" /><shifted display="F" /></key>
+      <key><default display="g" /><shifted display="G" /></key>
+      <key><default display="h" /><shifted display="H" /></key>
+      <key><default display="j" /><shifted display="J" /></key>
+      <key><default display="k" /><shifted display="K" /></key>
+      <key><default display="l" /><shifted display="L" /></key>
+      <key width="1500"><default display="Enter" action="return" /></key>
+    </row>
+    <row>
+      <key width="1500"><default display="Shift" action="shift" /></key>
+      <key><default display="z" /><shifted display="Z" /></key>
+      <key><default display="x" /><shifted display="X" /></key>
+      <key><default display="c" /><shifted display="C" /></key>
+      <key><default display="v" /><shifted display="V" /></key>
+      <key><default display="b" /><shifted display="B" /></key>
+      <key><default display="n" /><shifted display="N" /></key>
+      <key><default display="m" /><shifted display="M" /></key>
+      <key><default display="," /></key>
+      <key><default display="." /></key>
+      <key><default display="-" /><shifted display="_" /></key>
+    </row>
+    <row>
+      <space width="500" fill="false"/>
+      <key width="3000"><default display="Ctrl" keysym="Control_L" /></key>
+      <key width="12000"><default display="space" keysym="space" /></key>
+      <key width="3000"><default display="Tab" keysym="Tab" /></key>
+      <space width="500" fill="false"/>
+    </row>
+  </layout>
+</keyboard>

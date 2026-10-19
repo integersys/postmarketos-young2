@@ -1,0 +1,484 @@
+#!/usr/bin/env python3
+"""young2-window-bounds — keep NORMAL application windows inside the usable
+workarea of the Young2 320x480 Xfce desktop.
+
+Event-driven (X SelectInput on root: SubstructureNotify + StructureNotify +
+PropertyChange). No polling loop. On interesting events we recompute and
+clamp only windows whose DECORATED FRAME exceeds the live _NET_WORKAREA
+(read fresh each pass so panel changes are honored automatically).
+
+Handles (client windows from _NET_CLIENT_LIST):
+  - type NORMAL or unset (this Xfce stack sets no type)
+  - not override-redirect
+  - not the desktop (Xfdesktop), not panels (Xfce4-panel), not the
+    on-screen keyboard (Matchbox-keyboard) — matched by WM_CLASS
+  - transient dialogs are clamped too (where safe: never resized below
+    their own min hints, only moved if resizable == False)
+  - skip maximized/fullscreen windows (xfwm4 maximize is already correct)
+
+Algorithm per the task policy:
+  frame = parent window geometry (xfwm4 reparented frame incl. titlebar)
+  workarea read fresh from root _NET_WORKAREA
+  clamp: width  = min(width,  wa_w) if client is resizable
+         height = min(height, wa_h) if client is resizable
+         x: keep frame fully inside [wa_x, wa_x+wa_w]
+         y: keep frame fully inside [wa_y, wa_y+wa_h]
+  resize is done on the CLIENT (xfwm4 adjusts the frame), respecting
+  WM_NORMAL_HINTS min size and resize increments (never below min).
+  If min hints exceed the workarea, we clamp position only (window stays
+  as large as it insists, but is positioned to maximize visible content,
+  anchored at the workarea top-left) — documented behavior.
+
+No loops: we only act when the frame is OUT of bounds; after our own move/
+resize the next event pass sees a valid geometry (idempotent clamp).
+
+Runs until stdin/stdout closes or SIGTERM; exits 0 quietly.
+"""
+
+import ctypes
+DEBUG = False  # stderr diagnostics; enable temporarily only when debugging
+import os
+import signal
+import struct
+import sys
+import time
+
+X11 = "libX11.so.6"
+
+# Error handler that swallows BadWindow (race: window died between listing
+# and probing). Without this ctypes Xlib prints and misbehaves.
+_old_handler = None
+
+
+def _quiet_error_handler(d, ev):
+    return 0
+
+
+ERROR_HANDLER_CFP = None
+
+
+def install_error_handler(x11):
+    global ERROR_HANDLER_CFP
+    CFP = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+    ERROR_HANDLER_CFP = CFP(_quiet_error_handler)
+    x11.XSetErrorHandler(ERROR_HANDLER_CFP)
+
+# WM_CLASS names never to touch
+SKIP_CLASS = {
+    "Xfdesktop",       # desktop
+    "Xfce4-panel",     # panels / dock
+    "xfce4-panel",
+    "Matchbox-keyboard",  # on-screen keyboard
+    "matchbox-keyboard",
+    "Xfwm4",           # WM internals
+    "xfwm4",
+}
+
+# --- minimal Xlib constants -------------------------------------------------
+PropModeReplace = 0
+AnyPropertyType = 0
+SubstructureNotifyMask = 1 << 19
+StructureNotifyMask = 1 << 23
+PropertyChangeMask = 1 << 22
+SubstructureRedirectMask = 1 << 20
+
+CWEventMask = 1 << 11
+
+
+class XEventUnion(ctypes.Union):
+    class _any(ctypes.Structure):
+        _fields_ = [("type", ctypes.c_int)]
+    _fields_ = [("type", ctypes.c_int), ("pad", ctypes.c_byte * 192)]
+
+
+def main():
+    x11 = ctypes.CDLL(X11)
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    d = x11.XOpenDisplay(os.environ.get("DISPLAY", ":0").encode())
+    if not d:
+        print("young2-window-bounds: cannot open display", file=sys.stderr)
+        return 1
+    x11.XDefaultRootWindow.restype = ctypes.c_ulong
+    x11.XGetAtomName.restype = ctypes.c_char_p   # default c_int truncates ptr
+    root = x11.XDefaultRootWindow(d)
+    install_error_handler(x11)
+    # Window identity cache: X window id -> (class, parent_frame) learned on
+    # first sight. Guards against re-processing our own moves/resizes.
+    known = {}
+    last_clamped = {}   # window -> monotonic time of last helper-initiated change
+    import collections
+    import time as _t
+    clamp_times = collections.deque(maxlen=32)
+    recheck = []        # (window, due_time) — deferred second clamps
+
+    rt = ctypes.c_ulong(0); fmt = ctypes.c_int(0); ni = ctypes.c_ulong(0)
+    bl = ctypes.c_ulong(0); prop = ctypes.POINTER(ctypes.c_ubyte)()
+
+    def getprop(w, name, t=33, maxlen=200):
+        atom = x11.XInternAtom(d, name.encode(), False)
+        r = x11.XGetWindowProperty(d, w, atom, 0, maxlen, False, t,
+                                   ctypes.byref(rt), ctypes.byref(fmt),
+                                   ctypes.byref(ni), ctypes.byref(bl),
+                                   ctypes.byref(prop))
+        if r != 0 or not ni.value:
+            return None
+        return ctypes.string_at(prop, ni.value * (fmt.value // 8))
+
+    def cards(b):
+        return struct.unpack("<" + "i" * (len(b) // 4), b) if b else None
+
+    def atom_name(a):
+        pn = x11.XGetAtomName(d, a)
+        return pn.decode() if pn else "?"
+
+    def geom(w):
+        dr = ctypes.c_ulong(0); x = ctypes.c_int(); y = ctypes.c_int()
+        ww = ctypes.c_int(); hh = ctypes.c_int(); bw = ctypes.c_uint()
+        dep = ctypes.c_uint()
+        x11.XGetGeometry.restype = ctypes.c_int
+        if not x11.XGetGeometry(d, w, ctypes.byref(dr), ctypes.byref(x),
+                                ctypes.byref(y), ctypes.byref(ww),
+                                ctypes.byref(hh), ctypes.byref(bw),
+                                ctypes.byref(dep)):
+            return None
+        return ww.value, hh.value, x.value, y.value
+
+    def class_name(w):
+        cls = getprop(w, "WM_CLASS", 0)
+        if not cls:
+            return ""
+        return cls.split(b"\x00")[1].decode(errors="replace")
+
+    def workarea():
+        # type 0 = AnyPropertyType — _NET_WORKAREA is XA_CARDINAL; requesting a
+        # mismatched concrete type makes Xlib return zero items (measured).
+        b = getprop(root, "_NET_WORKAREA", 0)
+        if not b or len(b) < 16:
+            return 0, 0, 320, 480
+        x, y, w, h = struct.unpack("<4i", b[:16])
+        return x, y, w, h
+
+    def is_maximized(w):
+        st = getprop(w, "_NET_WM_STATE", 0)
+        if not st:
+            return False
+        names = {atom_name(a) for a in struct.unpack("<" + "I" * (len(st) // 4), st)}
+        return bool(names & {"_NET_WM_STATE_MAXIMIZED_VERT",
+                             "_NET_WM_STATE_MAXIMIZED_HORZ",
+                             "_NET_WM_STATE_FULLSCREEN"})
+
+    def size_hints(w):
+        """returns (min_w, min_h, inc_w, inc_h) with 0 = unconstrained"""
+        h = getprop(w, "WM_NORMAL_HINTS", 0)
+        if not h or len(h) < 72:
+            return 0, 0, 0, 0
+        vals = struct.unpack("<18i", h[:72])
+        flags = vals[0]
+        min_w, min_h = vals[5], vals[6]
+        inc_w, inc_h = vals[9], vals[10]
+        base_w, base_h = vals[13], vals[14]
+        if not (flags & 0x10):   # PMinSize
+            min_w = min_h = 0
+        if not (flags & 0x40):   # PResizeInc
+            inc_w = inc_h = 0
+        return min_w, min_h, inc_w, inc_h
+
+    # window -> monotonic time of last hint rewrite. RATE LIMIT, not one-shot:
+    # GTK apps re-assert their own WM_NORMAL_HINTS right after mapping
+    # (measured 2026-09-24: fresh Thunar rewrites 477x174 within ~a second,
+    # undoing our first sanitize before xfwm4 applies our resize), so the
+    # sanitize must be re-applied on a later pass. Once the window is inside
+    # the workarea the resize gate stops touching it, so this converges.
+    hints_sanitized = {}
+    HINT_REWRITE_MIN_INTERVAL = 1.0
+
+    def sanitize_min_hints(w, cw, ch, min_w, min_h):
+        """Bogus-min-hint override (documented): some GTK apps (Thunar, some
+        dialogs) advertise PMinSize >= 60% of our 320 px workarea while being
+        freely resizable. xfwm4 ENFORCES min hints on every resize (measured:
+        direct XResizeWindow gets width-clamped back to min), so the ONLY way
+        to bound such a window is to clear the bogus PMinSize in its hints.
+        We keep every other hint field intact and only lower min to 1x1 when
+        it exceeds 60% of the workarea."""
+        wa_x, wa_y, wa_w, wa_h = workarea()
+        bogus = (min_w > int(wa_w * 0.6)) or (min_h > int(wa_h * 0.6))
+        if not bogus:
+            return min_w, min_h
+        now = _t.monotonic()
+        lt = hints_sanitized.get(w)
+        if lt is not None and now - lt < HINT_REWRITE_MIN_INTERVAL:
+            return min_w, min_h   # rate-limited; a later pass will retry
+        h = getprop(w, "WM_NORMAL_HINTS", 0)
+        if not h or len(h) < 72:
+            return min_w, min_h
+        vals = list(struct.unpack("<18i", h))
+        flags = vals[0]
+        # cap PMinSize at workarea instead of clearing (safest for layout)
+        if vals[5] > int(wa_w * 0.6):
+            vals[5] = int(wa_w * 0.6) if vals[5] else 0
+        if vals[6] > int(wa_h * 0.6):
+            vals[6] = int(wa_h * 0.6) if vals[6] else 0
+        # ensure PMinSize flag set so our values take effect
+        vals[0] = flags | 0x10
+        newh = struct.pack("<18i", *vals)
+        atom = x11.XInternAtom(d, b"WM_NORMAL_HINTS", False)
+        x11.XChangeProperty(d, w, atom, atom, 32, 0, newh, 18)
+        hints_sanitized[w] = now
+        return vals[5], vals[6]
+
+    def resize_client(w, cw, ch):
+        x11.XResizeWindow(d, w, ctypes.c_uint(max(1, cw)),
+                          ctypes.c_uint(max(1, ch)))
+
+    def move_frame(fw, fx, fy):
+        x11.XMoveWindow(d, fw, ctypes.c_int(fx), ctypes.c_int(fy))
+
+    # EWMH _NET_MOVERESIZE_WINDOW: ask the WM to move the client so its FRAME
+    # lands at (x,y). Direct XMoveWindow on xfwm4's frame is intercepted by
+    # SubstructureRedirect and turned into a ConfigureRequest that xfwm4
+    # ignores for its own frames (measured: infinite move loop). The client
+    # message goes through the WM's own code path and sticks.
+    # NOTE: layout hardcodes LP32 (ARM32 phone: long==4). This helper only
+    # ever runs there.
+    SubstructureRedirectMask = 1 << 20
+    atoms = {}
+    def moveresize_frame(w, fx, fy):
+        buf = (ctypes.c_byte * 96)()   # >= sizeof(XEvent) on LP32
+        def put(off, val):
+            v = ctypes.c_int(val)
+            ctypes.memmove(ctypes.byref(buf, off),
+                           ctypes.byref(v), 4)
+        put(0, 33)      # type = ClientMessage
+        put(4, 0)       # serial
+        put(8, 0)       # send_event = False
+        put(12, 0)      # display (unused)
+        put(16, w)      # target CLIENT window
+        if "mra" not in atoms:
+            atoms["mra"] = x11.XInternAtom(d, b"_NET_MOVERESIZE_WINDOW", False)
+        put(20, atoms["mra"])
+        put(24, 32)     # format = 32 (data.l)
+        # data.l[0..4] begins at offset 28 on LP32 (7 header longs)
+        put(28, (1 << 8) | (1 << 9))   # flags: x valid | y valid
+        put(32, fx)
+        put(36, fy)
+        put(40, 0)      # width unused
+        put(44, 0)      # height unused
+        x11.XSendEvent(d, root, False,
+                       SubstructureRedirectMask | SubstructureNotifyMask,
+                       buf)
+
+    def clamp_client(w):
+        """clamp one client window (and its frame) into the workarea"""
+        cls = class_name(w)
+        if cls in SKIP_CLASS or cls in ("", "TestCl"):
+            return
+        # minimized windows have no visible frame to clamp; also XGetGeometry
+        # on them gives stale/unmapped values
+        ws = getprop(w, "WM_STATE", 0)   # WM_STATE is its own atom type, not 33
+        if ws and len(ws) >= 2 and ws[0] == 3:   # IconicState
+            return
+        # resize-loop guard: skip windows we ourselves changed within the
+        # last 300 ms unless their geometry CHANGED again since our clamp
+        now = _t.monotonic()
+        lt = last_clamped.get(w)
+        g = geom(w)
+        if not g:
+            return
+        cw, ch, cx, cy = g
+        if lt and now - lt < 0.3 and known.get(w) == (cls, cw, ch, cx, cy):
+            return
+        known[w] = (cls, cw, ch, cx, cy)
+        # override-redirect popups: never touch
+        # (they are not in _NET_CLIENT_LIST anyway)
+        if is_maximized(w):
+            return
+        wa_x, wa_y, wa_w, wa_h = workarea()
+
+        # find the frame: our parent (xfwm4 reparents clients)
+        par = ctypes.c_ulong(0)
+        got = ctypes.c_ulong(0); pp = ctypes.c_ulong(0); nn = ctypes.c_ulong(0)
+        kp2 = ctypes.POINTER(ctypes.c_ulong)()
+        if not x11.XQueryTree(d, w, ctypes.byref(got), ctypes.byref(par),
+                              ctypes.byref(kp2), ctypes.byref(nn)):
+            return
+        g = geom(w)
+        if not g:
+            return
+        cw, ch, cx, cy = g
+        min_w, min_h, inc_w, inc_h = size_hints(w)
+        # bogus-min override BEFORE any resize decision (see docstring)
+        min_w, min_h = sanitize_min_hints(w, cw, ch, min_w, min_h)
+
+        if par and par != root:
+            fg = geom(par)
+            if not fg:
+                return
+            fw, fh, fx, fy = fg
+            # frame relative to client
+            bord_l = cx - fx
+            bord_t = cy - fy
+            bord_r = fw - cw - bord_l
+            bord_b = fh - ch - bord_t
+        else:
+            # unmanaged edge case: treat client as frame
+            fw, fh, fx, fy = cw, ch, cx, cy
+            bord_l = bord_t = bord_r = bord_b = 0
+
+        need_resize = False
+        # resize if frame exceeds workarea (min hints already sanitized above)
+        if fw > wa_w and (not min_w or (cw > min_w)):
+            need_resize = True
+        if fh > wa_h and (not min_h or (ch > min_h)):
+            need_resize = True
+        if DEBUG and (fw > wa_w or fh > wa_h or fx < wa_x or fy < wa_y or
+                      fx + fw > wa_x + wa_w or fy + fh > wa_y + wa_h):
+            print("bounds: %s 0x%x frame=(%d,%d) %dx%d client=%dx%d "
+                  "min=(%d,%d) wa=(%d,%d,%d,%d) resize=%s" %
+                  (cls, w, fx, fy, fw, fh, cw, ch, min_w, min_h,
+                   wa_x, wa_y, wa_w, wa_h, need_resize), flush=True)
+
+        if need_resize:
+            new_w, new_h = cw, ch
+            if fw > wa_w:
+                avail = wa_w - bord_l - bord_r
+                new_w = max(min_w if min_w else avail, min(cw, avail))
+            if fh > wa_h:
+                avail = wa_h - bord_t - bord_b
+                new_h = max(min_h if min_h else avail, min(ch, avail))
+            if inc_w and min_w:
+                new_w = max(min_w, new_w - ((new_w - min_w) % inc_w))
+            if inc_h and min_h:
+                new_h = max(min_h, new_h - ((new_h - min_h) % inc_h))
+            if (new_w, new_h) != (cw, ch):
+                resize_client(w, new_w, new_h)
+                last_clamped[w] = _t.monotonic()
+                # frame geometry will change; recompute for positioning
+                fw = new_w + bord_l + bord_r
+                fh = new_h + bord_t + bord_b
+                cw, ch = new_w, new_h
+
+        # position clamp: frame must be fully inside workarea when it fits;
+        # otherwise anchor top-left of workarea (max visible content).
+        new_x, new_y = fx, fy
+        if fw <= wa_w:
+            if fx < wa_x:
+                new_x = wa_x
+            elif fx + fw > wa_x + wa_w:
+                new_x = wa_x + wa_w - fw
+        else:
+            new_x = wa_x
+        if fh <= wa_h - 0:
+            if fy < wa_y:
+                new_y = wa_y
+            elif fy + fh > wa_y + wa_h:
+                new_y = wa_y + wa_h - fh
+        else:
+            new_y = wa_y
+        if (new_x, new_y) != (fx, fy):
+            if DEBUG:
+                print("bounds: move %s 0x%x (%d,%d) -> (%d,%d)" %
+                      (cls, w, fx, fy, new_x, new_y), flush=True)
+            if par and par != root:
+                moveresize_frame(w, new_x, new_y)
+            else:
+                move_frame(w, new_x, new_y)
+            last_clamped[w] = _t.monotonic()
+            # Re-assert after a delay: xfwm4 sometimes applies its own
+            # reposition AFTER our move (resize-settle), overwriting it.
+            # Schedule a follow-up check rather than spinning here.
+            recheck.append((w, _t.monotonic() + 0.7))
+
+    def scan_all(_reason=""):
+        b = getprop(root, "_NET_CLIENT_LIST", 33)
+        if not b:
+            return
+        for i in range(len(b) // 4):
+            w = int.from_bytes(b[i * 4:(i + 1) * 4], "little")
+            try:
+                clamp_client(w)
+            except Exception as e:
+                if DEBUG:
+                    print("bounds: EXC on 0x%x: %r" % (w, e), flush=True)
+
+    # --- event mask on root -------------------------------------------------
+    ev = ctypes.c_long(SubstructureNotifyMask | StructureNotifyMask |
+                       PropertyChangeMask)
+    attr_changes = (ctypes.c_ulong * 1)(ev.value)  # placeholder, use XSetWindowAttributes struct
+    class XSWA(ctypes.Structure):
+        _fields_ = [("background_pixmap", ctypes.c_ulong),
+                    ("background_pixel", ctypes.c_ulong),
+                    ("border_pixmap", ctypes.c_ulong),
+                    ("border_pixel", ctypes.c_ulong),
+                    ("bit_gravity", ctypes.c_int),
+                    ("win_gravity", ctypes.c_int),
+                    ("backing_store", ctypes.c_int),
+                    ("backing_planes", ctypes.c_ulong),
+                    ("backing_pixel", ctypes.c_ulong),
+                    ("save_under", ctypes.c_bool),
+                    ("event_mask", ctypes.c_long),
+                    ("do_not_propagate_mask", ctypes.c_long),
+                    ("override_redirect", ctypes.c_bool),
+                    ("colormap", ctypes.c_ulong),
+                    ("cursor", ctypes.c_ulong)]
+    swa = XSWA()
+    swa.event_mask = ev.value
+    x11.XSelectInput(d, root, ctypes.c_long(ev.value))
+
+    x11.XSync(d, False)
+    print("young2-window-bounds: watching (root %#x)" % root, flush=True)
+
+    # initial pass (recheck/last_clamped/known defined above, before main())
+    scan_all("startup")
+
+    ev_u = XEventUnion()
+    last_pass = 0.0
+    xfd = x11.XConnectionNumber(d)
+    import select
+    running = [True]
+
+    def on_term(_sig, _frm):
+        running[0] = False
+
+    signal.signal(signal.SIGTERM, on_term)
+    signal.signal(signal.SIGINT, on_term)
+
+    while running[0]:
+        # drain all pending events without sleeping; block via select when idle
+        pending = x11.XPending(d)
+        if not pending:
+            # due deferred rechecks first (xfwm4 move-after-resize races)
+            now = _t.monotonic()
+            due = [r for r in recheck if r[1] <= now]
+            if due:
+                recheck[:] = [r for r in recheck if r[1] > now]
+                for w, _t2 in due:
+                    try:
+                        clamp_client(w)
+                    except Exception:
+                        pass
+                x11.XSync(d, False)
+                continue
+            r, _w, _x = select.select([xfd], [], [], 2.0)
+            if not r:
+                # periodic light recheck (panel changes etc.) — every ~2s idle
+                scan_all("idle")
+                continue
+            continue
+        while x11.XPending(d):
+            x11.XNextEvent(d, ctypes.byref(ev_u))
+            t = ev_u.type
+            # MapNotify=19 ConfigureNotify=22 PropertyNotify=28 ReparentNotify=21
+            if t in (19, 21, 22, 28):
+                now = time.monotonic()
+                # debounce bursts: at most one scan per 50 ms
+                if now - last_pass >= 0.05:
+                    last_pass = now
+                    scan_all("evt%d" % t)
+        x11.XSync(d, False)
+
+    x11.XCloseDisplay(d)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
