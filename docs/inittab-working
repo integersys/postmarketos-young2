@@ -19,4 +19,3 @@ tty6::respawn:/sbin/getty 38400 tty6
 ::ctrlaltdel:/sbin/reboot
 
 ::shutdown:/sbin/openrc shutdown
-
