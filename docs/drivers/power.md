@@ -2,7 +2,7 @@
 
 The vendor kernel uses Android wakelocks and earlysuspend. I tested battery
 reporting, real suspend-to-RAM, power-key wake, session preservation, shutdown and
-reboot separately; turning the screen off is not proof of deep sleep.
+reboot separately. Turning the screen off is not proof of deep sleep.
 
 ## Battery and desktop integration
 
@@ -16,20 +16,20 @@ time-remaining estimate. USB `current_now` did not provide a useful draw measure
 
 `xfce4-power-manager`, `pm-utils`, polkit and `xrefresh` were used. Without
 `pm-is-supported` from pm-utils, XFCE reported suspend unavailable. The physical
-power-button, sleep-button and hibernate-button actions in xfconf are set to 0;
-the separate daemon owns the physical key. Automatic idle suspend stays disabled.
+power-button, sleep-button and hibernate-button actions in xfconf are set to 0.
+The separate daemon owns the physical key. Automatic idle suspend stays disabled.
 
 ## Suspend and wake policy
 
 [young2-powerkey.py](../../userspace/power/young2-powerkey.py) reads KEY_POWER 116
 and writes `mem` or `on` to `/sys/power/state`. A one-byte framebuffer read probes
-the actual earlysuspend state: fb_read returns EPERM while suspended. This replaced
+the actual earlysuspend state. `fb_read` returns `EPERM` while suspended. This replaced
 a cached-state design that could perform suspend and wake from the same physical
 press, then desynchronize after charger wakes. A 1.5-second debounce prevents
-duplicate actions; a press held at least six seconds is ignored by this policy.
+duplicate actions. A press held for at least six seconds is ignored by this policy.
 
 On wake the daemon reasserts `FBIOPAN_DISPLAY` with yoffset 0 and invokes
-`xrefresh`. It also does a boot-time scanout repair from its own thread; a
+`xrefresh`. It also does a boot-time scanout repair from its own thread. A
 background local.d attempt did not survive service cleanup. Startup is
 [60-young2-powerkey.start](../../userspace/power/60-young2-powerkey.start).
 
@@ -45,11 +45,11 @@ October 6–7 tests recorded repeated `sprd_pm_deepsleep`, positive `deep_sus`,
 running session. Wi-Fi stayed associated, Bluetooth transport stayed up and
 later sensor/volume/front-key tasks repeated suspend cycles. Wake sources included
 the keypad, GPIO/EIC and VBUS. GUI Suspend, Shut Down and Restart were physically
-tested; automatic desktop startup was rechecked after reboot and power-on.
+tested, and automatic desktop startup was rechecked after reboot and power-on.
 
 The `usb_work` wakelock stays held while the USB gadget is active. With RNDIS/USB
 connected, a suspend request can reach only earlysuspend/screen-off. Battery-only
-tests established actual deep sleep; preserve a Wi-Fi access path when testing it.
+tests established actual deep sleep. Preserve a Wi-Fi access path when testing it.
 
 ## Current limits
 
@@ -62,7 +62,7 @@ tests established actual deep sleep; preserve a Wi-Fi access path when testing i
 - Kernel #10's KPLED experiment warns during LED writes/resume. #11 reverts that
   address change, but was only built, not separately flashed.
 - Later deep-sleep sequences produced DISPC sync timeouts and a roughly four-minute
-  reboot. A fresh boot cleared them; repeated-cycle robustness is still limited.
+  reboot. A fresh boot cleared them, but repeated-cycle robustness is still limited.
 
 The [installation map](../../userspace/INSTALL.md) gives the exact helper paths
 and the DPMS settings needed by this setup.

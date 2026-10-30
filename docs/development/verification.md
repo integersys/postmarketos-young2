@@ -29,8 +29,8 @@ state. They are not GitHub links or files required at runtime.
 | power/2026-10-06_power-management FINAL_REPORT | repeated real deep sleep, session preservation, GUI shutdown/reboot |
 | sensors/2026-10-07_sensors | physical poses, changing samples, three sleeps and two reboots |
 | audio/2026-10-07_volume-buttons | audible changes/true mute, OSD, held keys, sleep/reboot |
-| input/2026-10-07_front-buttons final October 9 sections | physical Home/Back/Recent, sleep/reboot; failed illumination |
-| camera/2026-10-11_camera session 2 | source/HAL geometry analysis; no live test of revised tool |
+| input/2026-10-07_front-buttons final October 9 sections | physical Home/Back/Recent and sleep/reboot, with failed illumination |
+| camera/2026-10-11_camera session 2 | source/HAL geometry analysis, without a live test of the revised tool |
 
 Within a task, later corrections take precedence over early summaries. In
 particular, the front-key file's early claim that the analog base needed changing
@@ -44,7 +44,7 @@ The Python power/front-key/volume helpers match the recorded final source
 revisions (before line-ending normalization). The touch translator is the
 320×480 revision, SHA256
 `907ec1632f6a53fdca2bb9d3913cae7957fe616e5b26765cbb11d392cda66099`.
-GUI startup and keyboard placement come from the preserved boot stack; bounds
+GUI startup and keyboard placement come from the preserved boot stack, while bounds
 handling comes from the final September 24 result. NetworkManager protection and
 Blueman category setup reproduce the measured configuration without saved secrets.
 
@@ -55,12 +55,12 @@ build artifacts. The resume patch is the measured subsequent sprdfb source diff.
 The copied current .config is byte-identical to `suspendfix.config.after`.
 The optional KPLED patch represents #11's source state and is not automatically
 applied. Compiler compatibility work includes the existing pmaports GCC7/GCC8/
-dtc/GNU89/ARM section fixes; existing source copyright notices remain in context.
+dtc/GNU89/ARM section fixes. Existing source copyright notices remain in context.
 
 ## Publication checks versus hardware tests
 
 This refresh checks script syntax, configuration, local links, patch application,
 source selection, staged contents and README identity. It does not rebuild the
 kernel, install packages, modify the phone, or repeat physical tests. One bounded
-SSH inspection timed out. Current live state is therefore UNKNOWN; the hardware
+SSH inspection timed out. Current live state is therefore UNKNOWN. The hardware
 table describes the last recorded demonstrated state.

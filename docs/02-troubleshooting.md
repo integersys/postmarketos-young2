@@ -1,6 +1,6 @@
 > Historical June 2026 headless-release notes. For the later XFCE system,
 > start with [the current documentation index](INDEX.md). Old release credentials
-> are historical; use your own password/key for a new installation.
+> are historical. Use your own password/key for a new installation.
 
 # Troubleshooting
 
@@ -259,7 +259,7 @@ This port is experimental — the pmaports folders may need cleanup. Check APKBU
 
 ## Manual rootfs does not have the startup scripts
 
-The repo stores them in `scripts/`; inside the rootfs they must be installed to `/etc/local.d/`, then:
+The repo stores them in `scripts/`. Inside the rootfs, install them to `/etc/local.d/`, then run:
 
 ```sh
 chmod +x /etc/local.d/*.start
@@ -274,7 +274,7 @@ The release rootfs uses `root`/`root` — a manual build doesn't inherit that. S
 
 ## Manual build has /usr/sbin/sshd missing
 
-The working SSH server during bring-up was `/usr/sbin/sshd.pam`; `/usr/sbin/sshd` didn't exist on that rootfs. The scripts handle this:
+The working SSH server during bring-up was `/usr/sbin/sshd.pam`. `/usr/sbin/sshd` didn't exist on that rootfs. The scripts handle this:
 
 ```sh
 SSHD=/usr/sbin/sshd.pam

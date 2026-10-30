@@ -16,12 +16,12 @@ packaged recipe was rebuilt or flashed during publication.
 
 | Build | Recorded status |
 |---|---|
-| 2016 `3.10.17-young2` | proven basis of June v3; no surviving exact source-to-binary path |
-| June `3.10.17-pmos` | recovered package binary; physical boot UNKNOWN |
-| October source builds through #8 | booted; USB parity, HCI UART and display resume demonstrated |
-| #9 | requested KPLED brightness no longer forced to zero; symbols still dark |
-| #10 | last recorded running; unsuccessful analog-base experiment causes ADI warnings |
-| #11 | built/packaged with that base change reverted; not separately flashed |
+| 2016 `3.10.17-young2` | proven basis of June v3, without a surviving exact source-to-binary path |
+| June `3.10.17-pmos` | recovered package binary, with physical boot UNKNOWN |
+| October source builds through #8 | booted, with USB parity, HCI UART and display resume demonstrated |
+| #9 | requested KPLED brightness no longer forced to zero, but symbols still dark |
+| #10 | last recorded running, with an unsuccessful analog-base experiment causing ADI warnings |
+| #11 | built/packaged with that base change reverted, but not separately flashed |
 
 The later booted kernels do not retroactively prove that the June pmbootstrap
 binary booted. Build numbers are historical outputs, not version tags assigned
@@ -44,7 +44,7 @@ Preparation refuses an existing output directory, exports the pinned commit,
 applies two ordered patches and installs the recorded config. Building runs
 olddefconfig then make with explicit `ARCH=arm`, `CROSS_COMPILE` and
 `CC=arm-linux-gnueabihf-gcc -msoft-float`. Keep a copy/hash of .config before and
-after normalization; historical #8/#9 normalization had no functional config
+after normalization. Historical #8/#9 normalization had no functional config
 delta. A modern environment is not automatically the recorded environment.
 
 The source Makefile overrides an environment-only CROSS_COMPILE. Command-line
@@ -53,7 +53,7 @@ assignment is necessary. Putting `-msoft-float` in CC also makes its early
 rejected `-march=armv7-a` without an FPU, selecting an ARMv5 fallback.
 
 For an interrupted build, rerun only `make` with those same arguments in the
-prepared directory. A WSL VM restart kills builds; rerunning preparation or
+prepared directory. A WSL VM restart kills builds. Rerunning preparation or
 olddefconfig can invalidate objects. Check process state, log freshness and
 output hashes before declaring a build finished.
 
@@ -67,19 +67,19 @@ output hashes before declaring a build finished.
 - [0002-sprdfb-resume.patch](../linux-samsung-young23g/patches/0002-sprdfb-resume.patch)
   is the tested sprdfb mode-validation change. RGB metadata is still corrected by
   the userspace boot helper.
-- Config: LZMA is necessary to fit the reserved boot region; DEVTMPFS is enabled,
+- Config: LZMA is necessary to fit the reserved boot region. DEVTMPFS is enabled,
   Android/Samsung composite gadget support is enabled and USB_ETH is disabled.
   HCIUART/H4, IST30XXB, K2HH, ALSA, earlysuspend and wakelocks remain enabled.
 - [Optional patches](../linux-samsung-young23g/patches/optional/STATUS.md) are not
   automatically applied: RGB source metadata was prepared but not physically
-  tested; the KPLED patch records #11's reverted-base state. The bad #10 address
+  tested. The KPLED patch records #11's reverted-base state. The bad #10 address
   change is deliberately omitted.
 
 ## Packaging a file, not flashing a phone
 
 The kernel package installs `/boot/vmlinuz-linux-samsung-young23g` and matching
 modules. The updated [APKBUILD](../linux-samsung-young23g/APKBUILD) uses the same
-source/config/patch inputs; the full abuild/pmbootstrap integration remains
+source/config/patch inputs. The full abuild/pmbootstrap integration remains
 unbuilt in this publication pass. It does not reproduce the custom ramdisk.
 Device package layout stays recognizable and `deviceinfo_flash_method=none`
 remains. No automated flashing is configured.
@@ -96,12 +96,12 @@ python3 /path/to/postmarketos-young2/scripts/build/make_boot_image.py     /path/
 It never writes a device. The output is an experimental file until separately
 authorized and physically tested. Read [recovery](recovery.md): the rest of p11
 contains protected opaque data and is not spare space. The earlier gzip kernel
-did not fit this envelope; fitting the full 8 MiB partition is insufficient.
+did not fit this envelope. Fitting the full 8 MiB partition is insufficient.
 
 The packager's original validation-state bug, output-overwrite behavior and
 oversized intermediate output were corrected for publication. Its original
 assembly flow and expected ramdisk remain. Run the synthetic ordinary-file tests
-with `python3 scripts/build/test_boot_image.py`; no backup or phone is opened.
+with `python3 scripts/build/test_boot_image.py`. No backup or phone is opened.
 Set `YOUNG2_TEST_TMPDIR` if the host's default temporary directory is restricted.
 
 ## Rootfs and missing inputs

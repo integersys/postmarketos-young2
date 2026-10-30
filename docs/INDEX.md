@@ -1,8 +1,7 @@
 # XFCE development documentation
 
 I started with a headless Alpine/postmarketOS system in June 2026. This branch
-collects the source and notes behind the later 320×480 XFCE system on my
-Samsung Galaxy Young 2 SM-G130HN.
+collects the source and notes behind the later 320×480 XFCE system on my phone.
 
 - [Hardware status](hardware-status.md): demonstrated features and test limits.
 - [XFCE bring-up](xfce-bringup.md): framebuffer, touch, desktop and boot integration.
@@ -13,8 +12,3 @@ Samsung Galaxy Young 2 SM-G130HN.
 - [Building](building.md), [installation](installation.md), [recovery](recovery.md).
 - [Known issues](known-issues.md), [development history](development/history.md),
   [verification records](development/verification.md), [changelog](../CHANGELOG.md).
-
-Status describes the last recorded tests through October 11, 2026. The phone was
-unreachable during this publication pass, so this is not a fresh hardware retest.
-The older numbered documents and the unchanged root README describe the June
-headless release. They do not describe a downloadable XFCE image.

@@ -43,11 +43,11 @@ The recorded system used Xorg/fbdev/evdev, xrandr, xset, xprop, xrefresh, Python
 libX11, XFCE 4.20 (session, xfwm4, panel, desktop, settings, xfconf, appfinder,
 terminal, Thunar), fonts, an icon theme, D-Bus and Matchbox keyboard/libfakekey.
 The kernel needs framebuffer, input, legacy uinput and a real VT. The October
-kernel's devtmpfs supplies base nodes; the original node helpers also support
+kernel's devtmpfs supplies base nodes, and the original node helpers also support
 the older kernel's missing-node setup.
 
-Keep the demonstrated gdk-pixbuf/loaders **2.42.12-r0** compatibility workaround;
-2.44/glycin failed on the old kernel. These were historical Alpine v3.19 armv7
+Keep the demonstrated gdk-pixbuf/loaders **2.42.12-r0** compatibility workaround.
+Version 2.44/glycin failed on the old kernel. These were historical Alpine v3.19 armv7
 packages installed alongside newer packages, not a tested general upgrade path.
 Use inspected, compatible package files and verify their origin/checksums. I do
 not publish an exact locked APK set or recommend a blind upgrade.
@@ -61,7 +61,7 @@ Other dependencies by integration:
 | Wi-Fi | networkmanager + wifi/cli/openrc support, wpa_supplicant, network-manager-applet, iw, device firmware/NVRAM |
 | Bluetooth | bluez/bluez-openrc, hciattach (deprecated BlueZ utilities), hciconfig, rfkill, device HCD, Blueman |
 | Power | xfce4-power-manager, UPower, pm-utils, polkit, xrefresh |
-| Accelerometer GUI | Python GI bindings, GTK3; no IIO service |
+| Accelerometer GUI | Python GI bindings and GTK3, without an IIO service |
 
 Build the original preload shim for **ARM musl**, not Windows or glibc:
 
@@ -71,25 +71,25 @@ python -m ziglang cc -target arm-linux-musleabihf -shared -fPIC -O2   -o young2-
 
 That is the recorded cross-build command. It was not rerun for this publication.
 The launcher exports LD_PRELOAD into the session. The shim's proven use is this
-root XFCE session's file-existence checks; it is not a general access-control shim.
+root XFCE session's file-existence checks. It is not a general access-control shim.
 
 ## Configuration and startup order
 
 1. Verify the keypad/touchscreen/accelerometer names against sysfs. Original policy
    daemons assume the observed event0/event1/event3 enumeration and 32-bit ARM ABI.
 2. Install the display/input files, the compact keyboard and the built shim.
-   Enable OpenRC `local`. Input nodes/symlink and fb0 must exist before GUI startup;
+   Enable OpenRC `local`. Input nodes/symlink and fb0 must exist before GUI startup.
    `98-rgb-bitfields.start` must follow `98-fb0-node.start`.
 3. Install `young2-gui` and its launcher/helpers. Enable with
-   `rc-update add young2-gui default`; control it with
+   `rc-update add young2-gui default` and control it with
    `rc-service young2-gui start|stop|restart|status` (choose one action).
    Its hard `need local` avoids the observed soft-ordering cycle.
-4. Audio nodes and routes run at 50/51; volume at 61. The packaged notification
+4. Audio nodes and routes run at 50/51, followed by volume at 61. The packaged notification
    autostart also supplies notifyd once XFCE has its D-Bus session.
 5. Power key runs at 60, sensor enable at 70, front keys at 72. For the running
    #10 kernel persist `/var/lib/young2-frontkeys.mode` as `off` and timeout as `2`
    before startup, or use `young2-frontkeys.py light off`. The CLI name includes
-   `.py`; no extensionless wrapper is required. This disables LED attempts; key
+   `.py`, so no extensionless wrapper is required. This disables LED attempts while key
    actions remain active. Some boot/resume LED-off writes still originate in the
    preserved script/kernel path and can warn on #10.
 6. Bluetooth's `zzz-bluetooth.start` runs after rfkill and mounted firmware.
@@ -97,8 +97,8 @@ root XFCE session's file-existence checks; it is not a general access-control sh
    a competing hciattach startup or independently enable an early bluetooth daemon.
 
 The recovered launcher starts a root session. The recorded XFCE preferences were
-under `/.config/xfce4/`; do not assume a nonroot home is equivalent. Selected
-panel/dock/theme preferences remain in the current rootfs; this repository does
+under `/.config/xfce4/`. Do not assume a nonroot home is equivalent. Selected
+panel/dock/theme preferences remain in the current rootfs. This repository does
 not copy a complete home directory. The existing XFCE status-tray plugin hosts
 nm-applet and Blueman through their packaged XDG autostart entries.
 
@@ -116,9 +116,9 @@ DISPLAY=:0 xset -dpms
 DISPLAY=:0 xset s off
 ```
 
-These commands require the same D-Bus environment as xfce4-session; running them
+These commands require the same D-Bus environment as xfce4-session. Running them
 in an unrelated SSH session is insufficient. UPower/Power Manager provide the
-battery icon; enable its tray display in Settings. Automatic idle suspend remains
+battery icon. Enable its tray display in Settings. Automatic idle suspend remains
 off. A future DPMS-unblank fix must be verified before re-enabling DPMS.
 
 ## NetworkManager migration
@@ -126,7 +126,7 @@ off. A future DPMS-unblank fix must be verified before re-enabling DPMS.
 Install the explicit rndis0-unmanaged rule first and preserve the static USB
 address and SSH link route. Disable `zzz-wifi.start`, the old standalone
 wpa_supplicant runlevel service, and any old `10-young2-wlan0-unmanaged.conf` rule.
-The recorded latter rule was superseded by migration; a fresh setup should not
+The recorded latter rule was superseded by migration. A fresh setup should not
 carry it. Enable NetworkManager with wlan0 managed and let it own its supplicant,
 DHCP and DNS. Do not publish or reuse a saved connection from another phone.
 

@@ -8,7 +8,7 @@
   accelerometer integration source with installation paths.
 - Document NetworkManager/nm-applet and Blueman ownership and reboot persistence.
 - Recover the working GCC 15 compatibility changes, LZMA/USB/HCIUART configuration
-  and the sprdfb resume patch; separate optional, unflashed changes.
+  and the sprdfb resume patch, with optional, unflashed changes kept separate.
 - Record hardware support, recovery boundaries, build limits and experimental
   SR352 camera work. No new rootfs, kernel release or media is published.
 

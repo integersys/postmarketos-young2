@@ -20,7 +20,7 @@ userspace boot and physical LCD output as separate tests.
 
 Spreadtrum `sprdfb` registered correctly, but the original kernel had no devtmpfs.
 The installed eudev refused to start, leaving `/dev` on plain tmpfs. Creating
-`/dev/fb0` from its sysfs major/minor solved access; it did not by itself establish
+`/dev/fb0` from its sysfs major/minor solved access, but did not by itself establish
 scanout. The boot script unblanked the panel and issued two pan calls, because
 the first refresh after boot is discarded by `SPRDFB_FRAMES_TO_SKIP`.
 
@@ -28,8 +28,8 @@ Direct physical colour tests established RGBX8888: bytes `R G B 00`, stride 1280
 320×480 visible, 320×960 virtual, two 614400-byte pages. The driver's reported
 offsets 24/16/8 were wrong. The working offsets are red 0, green 8, blue 16, with
 8 bits each and no alpha. I made the runtime correction persistent with
-`98-rgb-bitfields.start` and `fbvar.py`. The source RGB patch remains optional;
-it is not part of the recorded October kernel build.
+`98-rgb-bitfields.start` and `fbvar.py`. The source RGB patch remains optional
+and is not part of the recorded October kernel build.
 
 ## Xorg reaching the LCD
 
@@ -50,12 +50,12 @@ directly failed with the original driver's strict `FBIOPUT_VSCREENINFO` check.
 On September 20, `xmessage` became the first real interactive X application:
 the touchscreen clicked its button, with physical observation and a clean repeat.
 Openbox then demonstrated decorated windows and touch dragging. It needed a real
-font; the initial fontless setup crashed.
+font because the initial fontless setup crashed.
 
 ## Touch input
 
 The IST30xxB device reports type-B multitouch but no `BTN_TOUCH` or single-touch
-`ABS_X/ABS_Y`. Native evdev ignored its absolute axes; the original libinput
+`ABS_X/ABS_Y`. Native evdev ignored its absolute axes. The original libinput
 attempt also depended on a udev path that was unavailable.
 
 [ts-xlate.py](../userspace/input/ts-xlate.py) reads the raw touchscreen, creates a
@@ -86,7 +86,7 @@ Two old-kernel compatibility problems mattered:
   entries appeared missing, producing an empty Applications menu. The original
   [faccessat shim](../userspace/desktop/young2-faccessat-shim.c), preloaded into
   the session, restored the menu. Its demonstrated scope is this root session's
-  existence checks; it is not a general permission or libc replacement.
+  existence checks. It is not a general permission or libc replacement.
 
 The menu then launched a terminal by touch. The panel, desktop icons, launcher
 dock, window dragging, maximizing and keyboard typing were physically verified.
@@ -102,8 +102,8 @@ settings did not solve oversized initial windows.
 reads the live workarea and clamps decorated normal windows. It sanitizes large
 minimum hints, retries when GTK reasserts them, and asks xfwm4 to move windows
 through EWMH. Moving the frame directly caused a fight with the window manager.
-Panels, the desktop and keyboard are excluded; fullscreen/maximized windows are
-left to xfwm4. Tested dialogs are moved or resized where their hints permit it;
+Panels, the desktop and keyboard are excluded, and fullscreen/maximized windows are
+left to xfwm4. Tested dialogs are moved or resized where their hints permit it, but
 fixed-size dialogs can still be awkward on such a small screen.
 
 Fresh Terminal and Thunar windows, maximize/restore and dragging against the
@@ -127,16 +127,16 @@ by these files.
 ## Hardware controls
 
 The original [front-key daemon](../userspace/input/young2-frontkeys.py) reads raw
-events: Home 102 on `sci-keypad`; Back 158 and Recent 254 on the IST30xx device.
+events: Home 102 on `sci-keypad`, and Back 158 and Recent 254 on the IST30xx device.
 Home uses `wmctrl -k on`, Recent uses xfwm4's `alt+Tab`, and Back sends `alt+Left`
 through XTEST. Recent cannot be fixed with XKB alone: 254+8 exceeds the core X
 keycode range. The raw handler bypasses that limitation. All three actions were
-physically accepted on October 9; Back navigation was also tested in NetSurf.
+physically accepted on October 9. Back navigation was also tested in NetSurf.
 
 Volume keys 115/114 are handled by the [ALSA volume daemon](../userspace/audio/young2-volume.py).
 It uses speaker gain 0–8, restores DAC gain 4 above zero and mutes the DAC at zero.
 The keys and notification OSD passed listening, suspend and reboot tests.
-Capacitive-symbol illumination was not achieved; do not confuse key actions
+Capacitive-symbol illumination was not achieved. Do not confuse key actions
 with backlighting.
 
 ## Wireless and desktop applets
@@ -145,31 +145,31 @@ Wi-Fi first worked with bcmdhd firmware, wpa_supplicant and DHCP from a custom
 worker. On October 6 I moved wlan0 ownership to NetworkManager and its internal
 DHCP client. The old worker and standalone wpa_supplicant boot service must be
 disabled to avoid competing owners. `nm-applet` uses packaged XDG autostart and
-the existing XFCE status tray. Wi-Fi defaults use metric 100; the RNDIS fallback
+the existing XFCE status tray. Wi-Fi defaults use metric 100, while the RNDIS fallback
 uses 500. An explicit unmanaged rule protects `rndis0` and the SSH link route.
 
 Bluetooth uses BlueZ, Broadcom firmware and a persistent `hciattach` transport
 on `/dev/ttyS0`. Kernel HCIUART/H4 support was necessary. The
 [boot helper](../userspace/bluetooth/zzz-bluetooth.start) initializes HCI before
-starting bluetoothd. Blueman's packaged autostart supplies the tray icon; a local
+starting bluetoothd. Blueman's packaged autostart supplies the tray icon, and a local
 desktop-entry category override puts Bluetooth Manager in XFCE Settings.
-Controller initialization and real Classic/BLE discovery are demonstrated;
-pairing and audio profiles are separate, unproven claims.
+Controller initialization and real Classic/BLE discovery are demonstrated.
+Pairing and audio profiles are separate, unproven claims.
 
 ## Power and persistence
 
 UPower feeds the battery indicator in XFCE Power Manager. `pm-utils` was needed
 for its suspend capability detection. The physical power button belongs to
-[young2-powerkey.py](../userspace/power/young2-powerkey.py); XFCE's power-button
+[young2-powerkey.py](../userspace/power/young2-powerkey.py). XFCE's power-button
 actions are disabled so there is one policy owner.
 
 Short presses request `mem` or `on` through the Android earlysuspend interface.
 The daemon probes real framebuffer state, debounces presses and reasserts scanout
 plus `xrefresh` on wake. The kernel resume patch keeps Xorg's EnterVT ioctl from
 failing. Real suspend/resume cycles preserved the same graphical session.
-USB's `usb_work` wakelock prevents deep sleep while the gadget is active; screen
+USB's `usb_work` wakelock prevents deep sleep while the gadget is active, so screen
 off on USB is not proof of suspend-to-RAM. Shutdown and reboot were physically
-tested; attached VBUS can immediately boot offline charging mode after shutdown.
+tested. Attached VBUS can immediately boot offline charging mode after shutdown.
 
 DPMS remains a separate gap: its unblank path can leave stale scanout. The later
 front-key task disabled DPMS again. Keep both X DPMS and XFCE Power Manager's
@@ -194,5 +194,5 @@ has no complete verified frame.
 The repository now contains the recovered integration source, config and build
 patches. It does not contain a complete modern rootfs, firmware, saved networks,
 the private recovery ramdisk or every XFCE preference. Follow the
-[installation map](../userspace/INSTALL.md) and [build limits](building.md);
-copying the June image alone does not reproduce this desktop.
+[installation map](../userspace/INSTALL.md) and [build limits](building.md).
+Copying the June image alone does not reproduce this desktop.

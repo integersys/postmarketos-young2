@@ -10,14 +10,14 @@ returned after reboot. The published June image represents that headless stage.
 
 The recovered June pmbootstrap kernel `3.10.17-pmos` is different from the reused
 2016 kernel. Its package vmlinuz and the kernel in its generated boot.img are
-byte-identical; there were not two different kernels. No preserved physical
+byte-identical. There were not two different kernels. No preserved physical
 boot evidence establishes that June binary running on the phone.
 
 ## September: physical graphics and touch
 
 - September 17–18: found the devtmpfs/node problem, demonstrated raw RGBX drawing,
   corrected RGB metadata and made the correction run at boot.
-- September 19: made Xorg reach the physical LCD with a post-mode-set pan; built
+- September 19: made Xorg reach the physical LCD with a post-mode-set pan and built
   the uinput touch translator after native input attempts failed.
 - September 20: clicked the first real X client (`xmessage`), ran Openbox and
   demonstrated touch dragging. Fixed the boot touchscreen symlink and switched
@@ -37,7 +37,7 @@ boot evidence establishes that June binary running on the phone.
   added during this period.
 - October 4–5: reconstructed the source build with GCC 15.2.0, adjusted LZMA size
   and restored Android USB gadget parity. HCIUART/H4 then supplied Bluetooth
-  transport; radio discovery and automatic firmware startup were demonstrated.
+  transport. Radio discovery and automatic firmware startup were demonstrated.
   These later source-built kernels must not be confused with the unproven June
   `3.10.17-pmos` binary.
 - October 6–7: moved Wi-Fi to NetworkManager, added nm-applet/Blueman, repaired
@@ -46,7 +46,7 @@ boot evidence establishes that June binary running on the phone.
 - October 7–9: enabled and physically checked K2HH readings, integrated real
   volume/OSD and Home/Back/Recent actions, and repeated reboot/suspend checks.
   KPLED experiments did not illuminate the capacitive symbols. Kernel #10's bad
-  base change remained running; #11 was built to revert it, not separately flashed.
+  base change remained running. Kernel #11 was built to revert it, not separately flashed.
 - October 11: SR352 sensor control, CCIR activity and partial DMA were established.
   Static HAL analysis corrected the supposed mode-table interpretation and exposed
   missing capture geometry. A revised local tool was prepared, but no complete

@@ -7,7 +7,7 @@ publish a replacement rootfs or promise a one-command fresh installation.
 
 The tested model is SM-G130HN (`young23g` / `young2nfc3g`), ARMv7. Other variants
 require their own partition/board verification. On this phone p11 is boot, p12 is
-recovery/TWRP and p18 is the Linux rootfs; p20 is Android userdata, not this
+recovery/TWRP and p18 is the Linux rootfs. Partition p20 is Android userdata, not this
 installation's rootfs target.
 
 ## Starting from the historical release
@@ -20,7 +20,7 @@ not permission to overwrite the current phone or recovery.
 
 The old numbered documents retain June details because existing links point to
 them. Their old login is not a recommendation for a new installation. Set a unique
-password or your own SSH key; generate new SSH host keys and avoid copying saved
+password or your own SSH key, generate new SSH host keys and avoid copying saved
 credentials. Keep a tested USB rescue link before changing the graphical stack.
 
 ## Adding the development integration

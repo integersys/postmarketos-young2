@@ -1,6 +1,6 @@
 > Historical June 2026 headless-release notes. For the later XFCE system,
 > start with [the current documentation index](INDEX.md). Old release credentials
-> are historical; use your own password/key for a new installation.
+> are historical. Use your own password/key for a new installation.
 
 # Current status
 

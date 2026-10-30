@@ -2,7 +2,7 @@
 
 The fitted motion sensor is the STM K2HHTR, reported by the kernel as K2HH.
 Board source registers `I2C_BOARD_INFO("k2hh", 0x1d)` on GPIO I²C bus 5.
-Probe read chip ID `0x41`; sysfs reports vendor `STM` and name `K2HH`.
+Probe read chip ID `0x41`, and sysfs reports vendor `STM` and name `K2HH`.
 The schematic identifies the accelerometer as U404.
 
 ## Kernel and interface
@@ -14,8 +14,8 @@ were already enabled in the proven config. No sensor kernel patch was needed.
 
 `/sys/class/sensors/accelerometer_sensor/raw_data` exposes X,Y,Z.
 Enable and poll_delay live on the input device, recorded as
-`/sys/class/input/event3/device/{enable,poll_delay}`. EV_REL reports REL_X/Y/Z;
-there is no IIO interface. `iio-sensor-proxy` therefore cannot consume it directly.
+`/sys/class/input/event3/device/{enable,poll_delay}`. EV_REL reports REL_X/Y/Z.
+There is no IIO interface. `iio-sensor-proxy` therefore cannot consume it directly.
 The driver polls with a workqueue rather than using the wired interrupt.
 
 [70-young2-accel.start](../../userspace/sensors/70-young2-accel.start) sets
@@ -40,5 +40,5 @@ switches chip mode through its dev_pm_ops.
 Automatic display/touch rotation is not implemented or verified. The available
 orientation data alone does not establish rotation. Calibration data is absent,
 so the samples are uncalibrated. Other motion/environment sensors have no
-corresponding registration in the inspected young2 board/config; this work does
+corresponding registration in the inspected young2 board/config. This work does
 not create substitute devices.
