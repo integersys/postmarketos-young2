@@ -4,7 +4,7 @@ postmarketOS port for the Samsung Galaxy Young 2
 
 ## What is postmarketOS?
 
-postmarketOS is a Linux distribution based on Alpine Linux, replacing the stock Android system with a real Linux userspace. Essentially, real linux on a phone.
+postmarketOS is a Linux distribution based on Alpine Linux, replacing the stock Android system with a real Linux userspace. Essentially, real Linux on a phone.
 
 > Device page: [Samsung Galaxy Young 2 (samsung-young23g)](https://wiki.postmarketos.org/wiki/Samsung_Galaxy_Young_2_(samsung-young23g))
 
@@ -12,7 +12,7 @@ postmarketOS is a Linux distribution based on Alpine Linux, replacing the stock 
   <table>
     <tr>
       <td align="center" valign="top">
-        <img width="300" src="https://github.com/user-attachments/assets/90c813bc-6898-4942-94a1-c5b54f512f05"/>
+        <img width="300" src="https://github.com/user-attachments/assets/98ee8379-a4b3-4397-82af-14a2acff524a"/>
         <br>
         <em>Hey, look, there's me!</em>
       </td>
@@ -26,199 +26,381 @@ postmarketOS is a Linux distribution based on Alpine Linux, replacing the stock 
 
 ## Current status
 
-The device currently boots into a headless postmarketOS/Alpine userspace and can be accessed over USB networking with SSH.
+The phone now boots directly into a usable postmarketOS system with an XFCE desktop. If you want to switch to a headless SSH only pmOS install, switch to the "working-ssh" branch.
+
+The current XFCE v1 release includes the root filesystem, boot image, and Windows/TWRP installation scripts needed to install the tested system without manually copying large images into `/data` or typing raw `dd` commands.
 
 ### Working
 
 - Kernel boots
 - postmarketOS/Alpine root filesystem mounts
-- OpenRC starts
-- USB RNDIS networking works
-- SSH over USB works
-- The setup survives reboot and becomes reachable again over USB
+- OpenRC starts normally
+- Xorg starts automatically
+- XFCE starts automatically after boot
+- 320×480 framebuffer/display output
+- Touchscreen input
+- On-screen keyboard
+- USB RNDIS networking
+- SSH rescue access over USB on port `2222`
+- Wi-Fi
+- NetworkManager
+- Bluetooth controller and scanning
+- Audio output/routing
+- Battery reporting
+- Power button handling
+- Volume buttons
+- Front hardware buttons
+- Accelerometer
+- Suspend and resume
+- Reboot and shutdown
+- Hardware startup fixes survive reboot and run automatically
+  
+### Experimental
 
-### Not working yet
+- Camera bring-up exists and can produce preview output, but performance is still very slow and the camera is not considered ready for normal use
+- Sleep mode is still iffy.
 
-- Graphical UI is not finished
-- Wi-Fi is not configured
-- NetworkManager is not working correctly yet
-- Sound is not tested
-- Camera is not tested
-- Modem, calls, SMS, and mobile data are not working/tested
-- This is not ready for normal phone use, but it sure is interesting to watch!
+### Not working / not established
+
+- Modem
+- Phone calls
+- SMS
+- Mobile data
+
+
+## Repository layout
+
+The repository contains the device port itself as well as the scripts and documentation used during bring-up.
+
+```text
+device-samsung-young23g/
+    postmarketOS device package and device configuration
+
+linux-samsung-young23g/
+    downstream Linux kernel package for the Young 2
+
+scripts/
+    device bring-up, hardware, networking and development helper scripts
+
+docs/
+    development notes, hardware findings and porting documentation
+
+README.md
+    project status and installation guide
+```
+
+The ready-to-install XFCE system itself is distributed through the GitHub Releases page rather than being stored directly in the repository.
 
 ## Future plans
-- Try to bring up a basic graphical environment
-- Test touchscreen input
-- Investigate Wi-Fi support
-- Fix or improve NetworkManager/dbus-related issues
-- Investigate sensors, buttons, vibration, and battery reporting
-- Test charging, shutdown, reboot, suspend, and general power management
-- Improve documentation
-- Test if using an older version of postmarketOS can improve stability.
+
+- Improve camera performance and stability
+- Continue investigating the modem
+- Investigate calls, SMS and mobile data
+- Continue improving Wi-Fi and Bluetooth reliability
+- Improve power-management behaviour where possible
+- Keep documenting device-specific Spreadtrum/Samsung behaviour
 
 # Installation guide
 
-**Warning:** This is a manual dev bring-up, not an official installer. Tested only on SM-G130HN — other models/firmware may brick. Verify your model first: `Settings -> About phone -> Model number`. Proceed at your own risk.
+This is an experimental raw-partition installation for the **Samsung Galaxy Young 2 SM-G130HN**.
 
-**End result:** Linux (Alpine/postmarketOS) boots and is reachable via USB SSH (`ssh -tt -p 2222 root@172.16.42.1`, login `root/root`). No practical/usable GUI, Wi-Fi, sound, camera, modem, calls, SMS, or daily-driver use yet.
+Do not use these images or installer scripts on another phone model.
+Verify your model in Android before starting: Settings -> About phone -> Model number
 
-**Partition targets (SM-G130HN):**
-| Partition | Device |
+The release installer handles the raw flashing and verifies the written data afterward.
+
+## Partition targets
+
+The SM-G130HN port uses these partitions:
+
+| Purpose | Device |
 |---|---|
-| Boot/Kernel | `/dev/block/mmcblk0p11` |
-| Recovery (TWRP) | `/dev/block/mmcblk0p12` |
-| System/rootfs | `/dev/block/mmcblk0p18` |
+| Boot / kernel | `/dev/block/mmcblk0p11` |
+| Recovery / TWRP | `/dev/block/mmcblk0p12` |
+| postmarketOS rootfs | `/dev/block/mmcblk0p18` |
 | Userdata | `/dev/block/mmcblk0p20` |
 
-Choose one method below.
+---
+
+## 1. What you need
+
+You need a Windows PC and:
+
+- Samsung USB drivers
+- Odin
+- Android Platform Tools (`adb`)
+- A compatible TWRP build for the SM-G130HN
+- The **postmarketOS XFCE v1** release files
+
+The current XFCE release is available here:
+
+[postmarketOS XFCE v1 for Samsung Galaxy Young 2](https://github.com/integersys/postmarketos-young2/releases/tag/xfce-v1.0)
+
+From the release, download:
+
+```text
+system_pmos_xfce-SM-G130HN.img.xz
+pmos-xfce-boot-SM-G130HN.img
+install-postmarketos-xfce.ps1
+twrp-install-postmarketos.sh
+```
+After extracting the rootfs, your Downloads folder should contain:
+
+```text
+C:\Users\YourName\Downloads\
+│
+├── system_pmos_xfce-SM-G130HN.img.xz
+├── system_pmos_xfce-SM-G130HN.img
+├── pmos-xfce-boot-SM-G130HN.img
+├── install-postmarketos-xfce.ps1
+├── twrp-install-postmarketos.sh
+```
+
+The installer looks for its required files in the same directory as the `.ps1` file.
 
 ---
 
-## Method 1: Release Artifact Install
+## 2. Extract the XFCE root filesystem
 
-1. **Download release files**
-   - `system_pmos_raw-SM-G130HN.img.xz` (rootfs, compressed)
-   - `pmos-static-v3-boot-SM-G130HN.img` (boot image)
-   - `twrp_3.1.1-0_young23g_wulan17.tar.md5` (TWRP recovery)
+The root filesystem is distributed as:
 
-2. **Decompress the rootfs**
-Unzip it using 7zip, don't flash it as-is.
+```text
+system_pmos_xfce-SM-G130HN.img.xz
+```
 
-3. **Install Windows tools**: Samsung USB drivers, Odin, Android platform-tools aka adb.
+Use 7-Zip and choose:
 
-4. **Boot phone into Download Mode**: power off, hold `Volume Down + Home + Power`, then press `Volume Up` at the warning screen.
+```text
+7-Zip -> Extract Here
+```
 
-5. **Flash TWRP with Odin**:
-   - Connect phone via USB; confirm Odin detects it.
-   - Click `AP`, select `twrp_3.1.1-0_young23g_wulan17.tar.md5`
-   - Set `F. Reset Time: enabled`, disable `Auto Reboot` in Options
-   - Click `Start`, wait for `PASS`.
+You should then have:
 
-6. **Boot directly into TWRP**: Turn off the phone immediately after flashing by taking out the battery and hold `Volume Up + Home + Power` to go into Recovery.
+```text
+system_pmos_xfce-SM-G130HN.img
+```
 
-7. **Push files to the phone** (TWRP + USB connected):
-   ```powershell
-   .\adb.exe devices
-   .\adb.exe shell mkdir -p /data/pmos   # or use TWRP terminal: mkdir -p /data/pmos
-   .\adb.exe push C:\Users\User\Downloads\system_pmos_raw-SM-G130HN.img /data/pmos/system_pmos_raw.img
-   .\adb.exe push C:\Users\User\Downloads\pmos-static-v3-boot-SM-G130HN.img /data/pmos/pmos-static-v3-boot.img
+Do not try to flash the `.xz` file directly.
+
+## 3. Flash TWRP first
+
+Download the TWRP recovery.
+
+[Download TWRP from here](https://github.com/integersys/postmarketos-young2/releases/tag/pmos)
+
+From that release, download:
+
+```text
+twrp_3.1.1-0_young23g_wulan17.tar.md5
+```
+
+Keep the `.tar.md5` file in your Downloads folder. This is the file you will select in Odin's **AP** slot.
+
+If TWRP is already installed and working, skip to the next section.
+
+Otherwise:
+
+1. Install the Samsung USB drivers.
+2. Open Odin.
+3. Power off the Galaxy Young 2.
+4. Hold:
+
+   ```text
+   Volume Down + Home + Power
    ```
-   (If `adb shell` fails, use the TWRP terminal instead — this is a known issue.)
 
-8. **Verify files and partitions** (TWRP terminal):
-   ```sh
-   ls -lh /data/pmos
-   cat /proc/partitions
-   ls -l /dev/block/mmcblk0p11 /dev/block/mmcblk0p12 /dev/block/mmcblk0p18 /dev/block/mmcblk0p20
+5. Confirm Download Mode with `Volume Up`.
+6. Connect the phone to the PC.
+7. Wait for Odin to detect it.
+8. Put the downloaded TWRP `.tar.md5` in the **AP** slot.
+9. Make sure **Re-Partition is disabled**.
+10. Disable **Auto Reboot**.
+11. `F. Reset Time` can remain enabled.
+12. Press **Start**.
+13. Wait for Odin to show **PASS**.
+
+### Boot directly into TWRP
+After Odin finishes:
+
+1. Hold `Volume Down + Home + Power` until the phone switches off.
+2. Immediately switch to:
+
+   ```text
+   Volume Up + Home + Power
    ```
 
-9. **Flash rootfs and boot image** (TWRP terminal):
-   ```sh
-   dd if=/data/pmos/system_pmos_raw.img of=/dev/block/mmcblk0p18 bs=4M
-   sync
-   dd if=/data/pmos/pmos-static-v3-boot.img of=/dev/block/mmcblk0p11 bs=4M
-   sync
-   ```
-
-10. **Reboot the phone** and wait 60–90 seconds. (Screen may look stuck even when Linux is running — check from the PC instead.)
-
-11. **Set up Windows RNDIS networking** (Admin PowerShell):
-    ```powershell
-    Get-NetAdapter | Format-Table Name,Status,InterfaceDescription -Auto
-    Remove-NetIPAddress -InterfaceAlias "Ethernet" -AddressFamily IPv4 -Confirm:$false -ErrorAction SilentlyContinue
-    netsh interface ipv4 set interface "Ethernet" dadtransmits=0
-    New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 172.16.42.2 -PrefixLength 24 -SkipAsSource $false
-    ping 172.16.42.1
-    ```
-    (Replace `"Ethernet"` with your actual RNDIS adapter name; install "Remote NDIS Compatible Device" driver manually in Device Manager if needed.)
-
-12. **SSH into the phone** (from WSL):
-    ```sh
-    ssh -tt -p 2222 root@172.16.42.1
-    ```
-    Login: root is username and password.
+3. Keep holding until TWRP appears.
 
 ---
 
-## Method 2: Manual Build
+## 4. Connect TWRP to Windows
 
-Use this if you want to build or modify the port yourself. Requires the release **boot image** unless you can rebuild it yourself.
+Leave the phone in TWRP and connect it over USB.
 
-1. **Install WSL build tools**:
-   ```sh
-   sudo apt update
-   sudo apt install -y git curl wget unzip nano openssh-client netcat-openbsd iputils-ping build-essential python3 python3-pip python3-venv
-   pip3 install --user pmbootstrap
-   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile
-   . ~/.profile
-   pmbootstrap --version
-   ```
+Open PowerShell and run:
 
-2. **Clone the repo**:
-   ```sh
-   cd /mnt/c/Users/User/Desktop
-   git clone https://github.com/integersys/postmarketos-young2.git pm
-   cd pm
-   git switch working-ssh
-   ```
+```powershell
+adb devices
+```
 
-3. **Initialize pmbootstrap**:
-   ```sh
-   pmbootstrap init
-   ```
-   Choose: Vendor `samsung`, Device `young23g`, Architecture `armv7`, UI `none`/`minimal` (no desktop yet).
+The phone should appear as an ADB device, normally with the state:
 
-4. **Copy device/kernel packages into pmaports and build**:
-   ```sh
-   cd /mnt/c/Users/User/Desktop/pm
-   PMAPORTS="$HOME/.local/var/pmbootstrap/cache_git/pmaports"
-   mkdir -p "$PMAPORTS/device/downstream"
-   cp -a device-samsung-young23g "$PMAPORTS/device/downstream/"
-   cp -a linux-samsung-young23g "$PMAPORTS/device/downstream/"
+```text
+recovery
+```
 
-   pmbootstrap checksum device-samsung-young23g
-   pmbootstrap checksum linux-samsung-young23g
-   pmbootstrap build device-samsung-young23g
-   pmbootstrap build linux-samsung-young23g
-   ```
+Example:
 
-5. **Build the rootfs image**:
-   ```sh
-   pmbootstrap install
-   find ~/.local/var/pmbootstrap -type f -name "*.img" | sort
-   ```
-   Confirm the image is a raw ext4 rootfs no larger than the system partition (~1,111,490,560 bytes on this device):
-   ```sh
-   ls -lh your-rootfs.img
-   stat -c '%s bytes' your-rootfs.img
-   ```
+```text
+List of devices attached
+xxxxxxxxxxxxxxxx    recovery
+```
 
-6. **Add startup scripts into the rootfs**:
-   Copy `scripts/00-dev-fix.start`, `scripts/usb-rndis-debug.start`, `scripts/99-ssh-pty-rndis.start` into `/etc/local.d/` inside the rootfs, then inside the rootfs:
-   ```sh
-   chmod +x /etc/local.d/*.start
-   rc-update add local default
-   ```
-   These handle device node fixes, USB RNDIS, phone IP (172.16.42.1), and starting `sshd.pam` on port 2222 (falls back to `/usr/sbin/sshd` if `sshd.pam` is missing).
+The old TWRP build used on this device has many broken commands, such as adb shell. That is to be expected, that is why this installation uses this partition chunk flashing workaround. This is the only TWRP version available for this device, as far as i know.
 
-7. **Set a root password** in the rootfs before flashing (the release default `root/root` does not apply to your own build). Before uploading/sharing any custom rootfs image, strip `/etc/shadow`, `/etc/ssh/ssh_host_*`, `/root/.ssh/authorized_keys`, `/root/.ash_history`, Wi-Fi configs, and logs.
+---
 
-8. **Get a boot image**: use the release `pmos-static-v3-boot-SM-G130HN.img` unless you already have the steps to rebuild the boot image (which does early device-node setup, mounts `/dev/block/mmcblk0p18`, `/proc`, `/sys`, `/dev/pts`, attempts `pivot_root`, falls back to `chroot`, then execs `/sbin/init`).
+## 5. Run the XFCE installer
 
-9. **Flash to the phone** — same as Method 1, steps 4–11: boot into Download Mode, flash TWRP with Odin, boot into TWRP, push your built rootfs image and the boot image to `/data/pmos/`, then:
-   ```sh
-   dd if=/data/pmos/<your-rootfs>.img of=/dev/block/mmcblk0p18 bs=4M
-   sync
-   dd if=/data/pmos/pmos-static-v3-boot.img of=/dev/block/mmcblk0p11 bs=4M
-   sync
-   ```
+Run the installer from PowerShell:
 
-10. **Reboot, set up Windows RNDIS (172.16.42.2/24), and SSH in**:
-    ```sh
-    ssh -tt -p 2222 root@172.16.42.1
-    ```
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\install-postmarketos-xfce.ps1"
+```
 
-## Sources
+The Windows installer first checks:
 
-* [TWRP](https://4pda.to/forum/index.php?showtopic=731597)
+- rootfs size
+- rootfs SHA-256
+- boot-image size
+- boot-image SHA-256
+- ADB/TWRP connectivity
+
+The installer then pushes the helper to:
+
+```text
+/tmp/pmos-install.sh
+```
+
+Eventually Windows will display:
+
+```text
+ON THE PHONE:
+
+TWRP -> Advanced -> Terminal
+
+Type exactly:
+
+    sh /tmp/pmos-install.sh
+```
+
+---
+
+## 6. Start the TWRP-side installer
+
+On the phone open:
+
+```text
+TWRP -> Advanced -> Terminal
+```
+
+Type exactly:
+
+```sh
+sh /tmp/pmos-install.sh
+```
+
+Leave the TWRP terminal open.
+
+The phone should display:
+
+```text
+READY
+Keep this TWRP terminal open.
+The Windows installer can now transfer the rootfs.
+```
+
+Windows detects this automatically and starts the installation.
+
+No other long commands need to be typed on the phone.
+
+---
+
+## 7. How the installer works
+
+This TWRP build on this device rejects large ADB writes to `/data` or `/sdcard`.
+
+The XFCE installer avoids those locations completely.
+
+Instead, the rootfs is transferred through TWRP's temporary `/tmp` filesystem in small chunks.
+
+## 9. Reboot into XFCE
+
+On the phone choose:
+
+```text
+TWRP -> Reboot -> System
+```
+
+TWRP may display:
+
+```text
+No OS Installed!
+```
+
+This can be ignored. TWRP does not understand the Linux root filesystem used by this port.
+
+If TWRP offers to install SuperSU or a TWRP application:
+
+**do not install it.**
+
+The phone should now boot directly into postmarketOS XFCE without requiring SSH commands or manual desktop setup.
+
+---
+
+# USB SSH access
+
+The XFCE release includes an automatic USB RNDIS rescue/SSH setup.
+
+The expected USB network is:
+
+```text
+Phone:   172.16.42.1
+PC:      172.16.42.2
+SSH:     TCP port 2222
+```
+
+Connect the phone over USB and try:
+
+```powershell
+ssh -tt -p 2222 root@172.16.42.1
+```
+
+### If USB networking is not reachable
+
+Check Windows network interfaces:
+
+```powershell
+Get-NetIPConfiguration | Where-Object {$_.IPv4Address -and $_.NetAdapter.Status -eq "Up"} | Select-Object InterfaceAlias,@{N="IP";E={$_.IPv4Address.IPAddress}},@{N="Gateway";E={$_.IPv4DefaultGateway.NextHop}}
+```
+
+Look for the USB/RNDIS Ethernet adapter.
+
+If Windows does not install it automatically, use Device Manager and select the **Remote NDIS Compatible Device** driver.
+
+The PC side of the USB link should use:
+
+```text
+172.16.42.2/24
+```
+
+and the phone should be reachable at:
+
+```text
+172.16.42.1
+```
+
+# Sources
+
+- [postmarketOS device page for the Samsung Galaxy Young 2](https://wiki.postmarketos.org/wiki/Samsung_Galaxy_Young_2_(samsung-young23g))
+- [TWRP](https://4pda.to/forum/index.php?showtopic=731597)
